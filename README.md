@@ -1,4 +1,4 @@
-﻿# 传达室 · qq-idle-input
+# 传达室 · qq-idle-input
 
 **不加钩子、不读内存的 QQ 读写。**
 
@@ -65,6 +65,15 @@ powershell -File core\qq-send.ps1 -To "某人" -Text "你好" -Do
 # 5. 面板
 node panel\server.mjs      # 然后打开 http://127.0.0.1:8765
 ```
+
+**窗口白了（一片白、点不动，但读还是好的）**——先跑这个，别急着重启 QQ：
+
+```powershell
+powershell -File core\qq-repaint.ps1        # 还原窗口 + 抖一像素，逼它重画
+powershell -File core\qq-repaint.ps1 -Uin 你的号 -DryRun   # 只看不动
+```
+
+它是渲染层不画了，不是页面坏了。重启会掉注入，得重新注一遍；重画不用。（见 KNOWN-ISSUES 十二）
 
 `-Json` 给结构化输出，agent 直接吃：
 

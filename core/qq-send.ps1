@@ -39,7 +39,10 @@ public static class QQS {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct WPLACE { public uint length, flags, showCmd; public POINT min, max; public RECT normal; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr h, ref WPLACE w);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
   [StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
@@ -105,6 +108,20 @@ public static class QQS {
     }
   }
 
+  // 11-21：缩着的时候 GetWindowRect 只回一个小矩形（160x28），比面积会输给旁边的浮窗。
+  // 最小化时改用「还原后」的位置。
+  public static long AreaOf(IntPtr h) {
+    if (IsIconic(h)) {
+      var w = new WPLACE(); w.length = (uint)Marshal.SizeOf(typeof(WPLACE));
+      if (GetWindowPlacement(h, ref w)) {
+        long aw = Math.Abs((long)(w.normal.R - w.normal.L) * (w.normal.B - w.normal.T));
+        if (aw > 0) return aw;
+      }
+    }
+    RECT r; if (!GetWindowRect(h, out r)) return 0;
+    return Math.Abs((long)(r.R - r.L) * (r.B - r.T));
+  }
+
   public static IntPtr FindByPid(uint pid) {
     IntPtr best = IntPtr.Zero; long area = 0;
     EnumWindows((h, p) => {
@@ -112,8 +129,7 @@ public static class QQS {
       if (wp != pid) return true;
       var sb = new StringBuilder(256); GetClassNameW(h, sb, 256);
       if (sb.ToString() != "Chrome_WidgetWin_1") return true;
-      RECT r; if (!GetWindowRect(h, out r)) return true;
-      long a = Math.Abs((long)(r.R - r.L) * (r.B - r.T));
+      long a = AreaOf(h);
       if (a > area) { area = a; best = h; }
       return true;
     }, IntPtr.Zero);

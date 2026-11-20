@@ -25,11 +25,29 @@ using System.Text;
 using System.Runtime.InteropServices;
 public static class QQWin {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct WPLACE { public uint length, flags, showCmd; public POINT min, max; public RECT normal; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr h, ref WPLACE w);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   public delegate bool EnumProc(IntPtr h, IntPtr p);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
+  // 11-21：窗口缩着的时候 GetWindowRect 只回一个小矩形（实测 160x28），
+  // 拿它比面积，会输给旁边那张「资料卡」浮窗（390x475），于是操作到浮窗身上。
+  // 最小化时改用「还原后」的位置来比。
+  public static long AreaOf(IntPtr h) {
+    if (IsIconic(h)) {
+      var w = new WPLACE(); w.length = (uint)Marshal.SizeOf(typeof(WPLACE));
+      if (GetWindowPlacement(h, ref w)) {
+        long aw = Math.Abs((long)(w.normal.R - w.normal.L) * (w.normal.B - w.normal.T));
+        if (aw > 0) return aw;
+      }
+    }
+    RECT r; if (!GetWindowRect(h, out r)) return 0;
+    return Math.Abs((long)(r.R - r.L) * (r.B - r.T));
+  }
   public static IntPtr FindByPid(uint pid) {
     IntPtr best = IntPtr.Zero; long area = 0;
     EnumWindows((h, p) => {
@@ -37,8 +55,7 @@ public static class QQWin {
       if (wp != pid) return true;
       var sb = new StringBuilder(256); GetClassNameW(h, sb, 256);
       if (sb.ToString() != "Chrome_WidgetWin_1") return true;
-      RECT r; if (!GetWindowRect(h, out r)) return true;
-      long a = Math.Abs((long)(r.R - r.L) * (r.B - r.T));
+      long a = AreaOf(h);
       if (a > area) { area = a; best = h; }
       return true;
     }, IntPtr.Zero);

@@ -131,10 +131,14 @@ if ($uiaOk -and $qqPid) {
   # 用 UIA 直接按进程找窗口，避开自写 P/Invoke
   # QQ 一个进程有好几个 Chrome_WidgetWin_1：主窗口、托盘小窗（32x39）、悬浮窗……
   # 11-20 就是抓到了第一个（32x39 那个），一直读到 11 个元素、什么都读不出。
-  # 规则：按窗口面积挑最大的那个。
+  # 规则：先按「无障碍元素多」挑，元素数一样再比面积。
+  # 11-21 补：窗口最小化时 GetWindowRect 只回一个小矩形（160x28），
+  # 按面积挑会挑到旁边那张「资料卡」浮窗（390x475，61 个元素）——
+  # 结果自检报「读不可以、一行会话都没有」，可主窗其实好好的（290 个元素）。
+  # 面积在缩着的时候不可信，元素数可信。
   if (-not ("__WW" -as [type])) {
     Add-Type @"
-using System; using System.Runtime.InteropServices; using System.Text;
+using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
 public static class __WW {
  public delegate bool EnumProc(IntPtr h, IntPtr p);
  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
@@ -142,25 +146,43 @@ public static class __WW {
  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
- public static IntPtr Biggest(uint pid) {
-   IntPtr best = IntPtr.Zero; long area = 0;
+ [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+ public static IntPtr[] List(uint pid) {
+   var l = new List<IntPtr>();
    EnumWindows((h, p) => {
      uint wp; GetWindowThreadProcessId(h, out wp);
      if (wp != pid) return true;
      var sb = new StringBuilder(256); GetClassNameW(h, sb, 256);
      if (sb.ToString() != "Chrome_WidgetWin_1") return true;
-     RECT r; if (!GetWindowRect(h, out r)) return true;
-     long a = Math.Abs((long)(r.R - r.L) * (r.B - r.T));
-     if (a > area) { area = a; best = h; }
-     return true;
+     l.Add(h); return true;
    }, IntPtr.Zero);
-   return best;
+   return l.ToArray();
  }
+ public static long Area(IntPtr h) {
+   RECT r; if (!GetWindowRect(h, out r)) return 0;
+   return Math.Abs((long)(r.R - r.L) * (r.B - r.T));
+ }
+ public static bool Minimized(IntPtr h) { return IsIconic(h); }
 }
 "@ -ErrorAction SilentlyContinue
   }
+
+  function Select-MainWindow([uint32]$procId) {
+    $best = [IntPtr]::Zero; $bestN = -1; $bestArea = -1
+    foreach ($h in [__WW]::List($procId)) {
+      $n = -1
+      try {
+        $ae = [System.Windows.Automation.AutomationElement]::FromHandle($h)
+        $n = $ae.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition).Count
+      } catch { $n = -1 }
+      $a = [__WW]::Area($h)
+      if ($n -gt $bestN -or ($n -eq $bestN -and $a -gt $bestArea)) { $best = $h; $bestN = $n; $bestArea = $a }
+    }
+    return $best
+  }
+
   $win = $null
-  $mainHwnd = [__WW]::Biggest([uint32]$qqPid)
+  $mainHwnd = Select-MainWindow ([uint32]$qqPid)
   if ($mainHwnd -ne [IntPtr]::Zero) { $win = [System.Windows.Automation.AutomationElement]::FromHandle($mainHwnd) }
   if (-not $win) {
     Say "window" "找到 QQ 窗口" "fail" "进程在，但没找到它的顶层窗口" "QQ 可能藏在托盘里，点开一次再跑"
@@ -177,7 +199,7 @@ public static class __VIS { [DllImport("user32.dll")] public static extern bool 
       if (-not $Json) { "      （窗口藏在托盘里，先显示出来——不抢焦点）" }
       [__VIS]::ShowWindow($hwndReal, 4) | Out-Null
       Start-Sleep -Milliseconds 900
-      $mainHwnd2 = [__WW]::Biggest([uint32]$qqPid)
+      $mainHwnd2 = Select-MainWindow ([uint32]$qqPid)
       if ($mainHwnd2 -ne [IntPtr]::Zero) { $win = [System.Windows.Automation.AutomationElement]::FromHandle($mainHwnd2) }
       $hwndReal = [IntPtr]$win.Current.NativeWindowHandle
     }
@@ -198,7 +220,7 @@ public static class __SW { [DllImport("user32.dll")] public static extern bool S
     $tries = 0
     while ($all.Count -le 20 -and $tries -lt 3) {
       Start-Sleep -Milliseconds 1500
-      $mm = [__WW]::Biggest([uint32]$qqPid)
+      $mm = Select-MainWindow ([uint32]$qqPid)
       if ($mm -ne [IntPtr]::Zero) { $win = [System.Windows.Automation.AutomationElement]::FromHandle($mm) } else { $win = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$win.Current.NativeWindowHandle) }
       $all = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
       if ($all.Count -le 20 -and $tries -eq 1) {
