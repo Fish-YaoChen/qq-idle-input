@@ -1,0 +1,59 @@
+{
+  "name": "dsh-qq-idle",
+  "version": "0.1.0",
+  "description": "传达室：不加钩子、不读内存的 QQ 读写。读走 Windows 无障碍接口，写只在你手停的那一下抢两秒前台",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "qq",
+    "uiautomation",
+    "accessibility",
+    "windows",
+    "no-hook"
+  ],
+  "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fish-YaoChen/qq-idle-input.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Fish-YaoChen/qq-idle-input/issues"
+  },
+  "homepage": "https://github.com/Fish-YaoChen/qq-idle-input#readme",
+  "type": "module",
+  "main": "plugin/lib/index.js",
+  "exports": {
+    ".": "./plugin/lib/index.js",
+    "./client": "./plugin/client/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "plugin",
+    "core",
+    "panel/server.mjs",
+    "panel/index.html",
+    "docs",
+    "compat",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "panel": "node panel/server.mjs",
+    "selfcheck": "powershell -NoProfile -ExecutionPolicy Bypass -File core/selfcheck.ps1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./plugin/cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  }
+}

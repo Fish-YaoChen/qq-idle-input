@@ -1,0 +1,5 @@
+# 把「传达室」这一行插进 DSH 的插件表。
+# 它本身不干活：核心在 core/，面板服务在 panel/，这一行只负责让设置里出现那个入口。
+- insert:
+    - id: dsh-qq-idle
+      name: dsh-qq-idle

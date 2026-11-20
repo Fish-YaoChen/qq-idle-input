@@ -1,0 +1,301 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>传达室</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* 浅色为主：跟常见网页/美化插件同一套底子，避免深色被插件覆盖后字看不清 */
+  :root {
+    --bg: #ffffff; --card: #f7f8fa; --line: #e3e6ec; --fg: #1f2329;
+    --dim: #6b7280; --accent: #2563eb; --ok: #12855a; --warn: #a16207; --bad: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #ffffff; --card: #f7f8fa; --line: #e3e6ec; --fg: #1f2329;
+      --dim: #6b7280; --accent: #2563eb; --ok: #12855a; --warn: #a16207; --bad: #c0392b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.65 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 10px; padding: 14px 18px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: 1px; }
+  .chip { font-size: 12px; padding: 2px 9px; border-radius: 10px; border: 1px solid var(--line);
+    color: var(--dim); background: var(--card); }
+  .chip.ok { color: var(--ok); border-color: #bfe3d1; background: #f2fbf7; }
+  .chip.bad { color: var(--bad); border-color: #f0c8c2; background: #fdf4f3; }
+  .spacer { flex: 1; }
+  button { background: #fff; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+  button:hover { border-color: #c9cfda; background: #fafbfc; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: #1d4ed8; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  main { padding: 16px 18px 40px; max-width: 940px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  section h2 { font-size: 13px; margin: 0 0 10px; color: var(--dim); font-weight: 600; letter-spacing: .5px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .row + .row { margin-top: 10px; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .switch input { display: none; }
+  .knob { width: 38px; height: 20px; border-radius: 12px; background: #d7dbe3; position: relative; transition: .15s; }
+  .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: .15s; }
+  .switch input:checked + .knob { background: #7cc4a1; }
+  .switch input:checked + .knob::after { left: 20px; background: var(--ok); }
+  input[type=text] { background: #fff; border: 1px solid var(--line); color: var(--fg);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; flex: 1; min-width: 160px; }
+  input[type=text]:focus { outline: 2px solid #cfe0ff; border-color: #9dbcf5; }
+  .label { width: 96px; color: var(--dim); font-size: 13px; flex: none; }
+  ul.sessions { list-style: none; margin: 0; padding: 0; }
+  ul.sessions li { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-top: 1px solid var(--line); }
+  ul.sessions li:first-child { border-top: none; }
+  .who { width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .preview { flex: 1; color: var(--dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .when { color: #9aa1ad; font-size: 12px; width: 62px; text-align: right; flex: none; }
+  .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; flex: none; }
+  .tabs button { border: none; border-radius: 0; padding: 3px 10px; font-size: 12px; background: transparent; color: var(--dim); }
+  .tabs button.on { background: #e8efff; color: var(--accent); font-weight: 600; }
+  .log { white-space: pre-wrap; font: 12px/1.6 Consolas, "Microsoft YaHei", monospace; color: var(--dim); max-height: 220px; overflow: auto; }
+  .hint { color: var(--dim); font-size: 12px; }
+  .warnbox { color: var(--warn); font-size: 12px; background: #fffbeb; border: 1px solid #fde68a;
+    border-radius: 8px; padding: 8px 10px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>传达室</h1>
+  <span id="chipRead" class="chip">读 ?</span>
+  <span id="chipWrite" class="chip">写 ?</span>
+  <span id="chipVer" class="chip">版本 ?</span>
+  <span class="spacer"></span>
+  <button id="btnOpenWeb">打开网页设置</button>
+  <button id="btnRefresh" class="primary">刷新</button>
+</header>
+
+<main>
+  <section>
+    <h2>开关</h2>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="togRead"><span class="knob"></span>读（看得到消息）</label>
+      <label class="switch"><input type="checkbox" id="togWrite"><span class="knob"></span>写（能发言）</label>
+      <span class="hint">两个都关着的时候，它什么都不做</span>
+    </div>
+    <div class="row">
+      <span class="label">群聊触发词</span>
+      <input type="text" id="groupTrigger" placeholder="群里必须带这个词才回，例如：小鱼" />
+    </div>
+    <div class="row">
+      <span class="label">QQ 号</span>
+      <input type="text" id="uin" placeholder="只在同时登了好几个号时才填；只登一个留空就行" />
+      <button id="btnSaveCfg">保存</button>
+    </div>
+    <div class="hint" style="margin-top:8px">QQ 号填的是什么：填入大肥鱼的账号（就是它要操作的那个号）。只登一个号时留空，它会自己找；登了多个号才要填，不然可能抓到另一个号的窗口。</div>
+  </section>
+
+  <section>
+    <h2>会话 <span class="hint" id="sessHint"></span></h2>
+    <ul class="sessions" id="sessions"></ul>
+    <div class="hint" id="sessEmpty" style="display:none">没读到会话——先看点「刷新」的结果。</div>
+    <div id="sessWarn" class="warnbox" style="display:none"></div>
+    <div class="hint" style="margin-top:10px">「关」= 完全不理；「只读」= 能看不能回；「可回」= 会替它回消息（得总开关「写」也开着）。</div>
+  </section>
+
+  <section>
+    <h2>手动发一条</h2>
+    <div class="row">
+      <span class="label">发给谁</span>
+      <select id="toName" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;min-width:180px">
+        <option value="">（先在下面会话里选「可回」）</option>
+      </select>
+      <span class="label" style="width:56px">内容</span>
+      <input type="text" id="msgText" placeholder="要说的话" />
+      <button id="btnSend">发送</button>
+    </div>
+    <div class="warnbox">发送会抢前台约两秒，全屏程序可能被最小化——别在全屏游戏里点。</div>
+  </section>
+
+  <section>
+    <h2>结果</h2>
+    <div class="log" id="log">还没刷新。</div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let cfg = null;
+
+function log(text) { $("log").textContent = text; }
+
+async function getJSON(url, opts) {
+  const r = await fetch(url, opts);
+  const t = await r.text();
+  try { return { status: r.status, body: JSON.parse(t) }; }
+  catch { return { status: r.status, body: { error: t.slice(0, 500) } }; }
+}
+
+function setChips(sc) {
+  const rd = sc?.可以读, wr = sc?.可以写, ver = sc?.版本;
+  const cr = $("chipRead"), cw = $("chipWrite"), cv = $("chipVer");
+  cr.textContent = "读 " + (rd ? "可以" : "不可以"); cr.className = "chip " + (rd ? "ok" : "bad");
+  cw.textContent = "写 " + (wr ? "可以" : "不可以"); cw.className = "chip " + (wr ? "ok" : "bad");
+  cv.textContent = "版本 " + (ver || "?"); cv.className = "chip";
+}
+
+let lastList = [];
+function renderSessions(list) {
+  if (list) lastList = list; else list = lastList;
+  const ul = $("sessions"); ul.innerHTML = "";
+  if (!list.length) { $("sessEmpty").style.display = "block"; return; }
+  $("sessEmpty").style.display = "none";
+
+  // 名字是 QQ 界面上的显示名（备注优先）。改备注就会对不上——这两条检查就是为它准备的。
+  const names = list.map((x) => String(x.会话 || ""));
+  const count = {};
+  names.forEach((n) => { count[n] = (count[n] || 0) + 1; });
+  const dups = Object.keys(count).filter((n) => count[n] > 1);
+  const white = Object.keys(cfg?.sessions || {}).filter((n) => (cfg.sessions[n] || "off") !== "off");
+  const missing = white.filter((n) => !names.includes(n));
+  const warnLines = [];
+  if (missing.length) warnLines.push(`白名单里有 ${missing.length} 个会话这次没找到：${missing.join("、")}——可能改名了（改备注就会变），也可能这个号没登着。`);
+  if (dups.length) warnLines.push(`有重名：${dups.join("、")}——按名字认会分不清是哪一个，建议在 QQ 里给它们改个备注区分开。`);
+  const warnBox = $("sessWarn");
+  warnBox.innerHTML = "";
+  if (warnLines.length) {
+    warnBox.style.display = "block";
+    warnLines.forEach((t) => { const d = document.createElement("div"); d.textContent = t; warnBox.appendChild(d); });
+  } else warnBox.style.display = "none";
+
+  // 失效的白名单项：给「迁移到某会话」和「删掉」两个按钮，改名之后两下就接上。
+  if (missing.length) {
+    const box = document.createElement("div");
+    box.style.marginTop = "8px";
+    missing.forEach((oldName) => {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap";
+      const lab = document.createElement("span");
+      lab.textContent = `「${oldName}」失效 →`;
+      const sel = document.createElement("select");
+      sel.style.cssText = "padding:4px 6px;border:1px solid #e3e6ec;border-radius:6px;background:#fff";
+      sel.innerHTML = `<option value="">（选一个新的会话）</option>` + names.map((n) => `<option value="${n}">${n}</option>`).join("");
+      const btnGo = document.createElement("button");
+      btnGo.textContent = "迁移到";
+      btnGo.onclick = async () => {
+        const target = sel.value;
+        if (!target) return log("先在下拉里选一个会话。");
+        cfg.sessions[target] = cfg.sessions[oldName];
+        delete cfg.sessions[oldName];
+        renderSessions(list);                    // 先让界面立刻变
+        log(`白名单：「${oldName}」已迁到「${target}」。`);
+        await getJSON("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessions: cfg.sessions }) });
+      };
+      const btnDel = document.createElement("button");
+      btnDel.textContent = "删掉";
+      btnDel.onclick = async () => {
+        delete cfg.sessions[oldName];
+        renderSessions(list);                    // 先让界面立刻变
+        log(`白名单：「${oldName}」已删掉。`);
+        await getJSON("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessions: cfg.sessions }) });
+      };
+      row.append(lab, sel, btnGo, btnDel);
+      box.appendChild(row);
+    });
+    warnBox.appendChild(box);
+  }
+
+  // 「发给谁」下拉只列设成「可回」的会话——手打名字既容易错，也容易过时。
+  const sel = $("toName");
+  if (sel) {
+    const replyable = list.filter((x) => (cfg?.sessions?.[x.会话] || "off") === "reply").map((x) => String(x.会话));
+    const keep = sel.value;
+    sel.innerHTML = replyable.length
+      ? replyable.map((n) => `<option value="${n}">${n}</option>`).join("")
+      : `<option value="">（没有设成「可回」的会话）</option>`;
+    if (replyable.includes(keep)) sel.value = keep;
+  }
+
+  for (const s of list) {
+    const li = document.createElement("li");
+    const state = cfg?.sessions?.[s.会话] || "off";
+    const name = String(s.会话 || "");
+    const prev = String(s.预览 || "");
+    li.innerHTML = `
+      <span class="who" title="${name}"></span>
+      <span class="preview"></span>
+      <span class="when"></span>
+      <span class="tabs">
+        <button data-state="off" class="${state === "off" ? "on" : ""}">关</button>
+        <button data-state="read" class="${state === "read" ? "on" : ""}">只读</button>
+        <button data-state="reply" class="${state === "reply" ? "on" : ""}">可回</button>
+      </span>`;
+    li.querySelector(".who").textContent = name + (count[name] > 1 ? " ⚠重名" : "");
+    li.querySelector(".preview").textContent = prev;
+    li.querySelector(".when").textContent = s.时间 || "";
+    li.querySelectorAll(".tabs button").forEach((b) => {
+      b.onclick = async () => {
+        cfg.sessions = cfg.sessions || {};
+        cfg.sessions[name] = b.dataset.state;
+        li.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+        log(`「${name}」设成${b.textContent}。`);
+        await getJSON("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessions: cfg.sessions }) });
+      };
+    });
+    ul.appendChild(li);
+  }
+}
+
+async function refresh() {
+  $("btnRefresh").disabled = true;
+  log("正在读…（QQ 窗口没加载完时会多等两轮，最多几秒）");
+  const c = await getJSON("/api/config");
+  if (c.status === 200) {
+    cfg = c.body;
+    $("togRead").checked = !!cfg.read;
+    $("togWrite").checked = !!cfg.write;
+    $("groupTrigger").value = cfg.groupTrigger || "";
+    $("uin").value = cfg.uin || "";
+  }
+  const st = await getJSON("/api/status");
+  setChips(st.body?.selfcheck);
+  const ss = await getJSON("/api/sessions");
+  renderSessions(ss.body?.sessions || []);
+  $("sessHint").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
+  log(ss.body?.ok
+    ? `读到 ${ss.body.sessions.length} 个会话。`
+    : "读失败：\n" + (ss.body?.raw || ss.body?.error || ""));
+  $("btnRefresh").disabled = false;
+}
+
+$("btnRefresh").onclick = refresh;
+
+$("btnSaveCfg").onclick = async () => {
+  const payload = {
+    read: $("togRead").checked, write: $("togWrite").checked,
+    groupTrigger: $("groupTrigger").value.trim(), uin: $("uin").value.trim()
+  };
+  const r = await getJSON("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (r.status === 200) { cfg = r.body; log("设置已保存。"); } else log("保存失败：" + (r.body?.error || r.status));
+};
+
+$("btnSend").onclick = async () => {
+  const to = $("toName").value.trim();
+  const text = $("msgText").value.trim();
+  if (!to || !text) return log("先填「发给谁」和「内容」。");
+  $("btnSend").disabled = true;
+  log("正在发…（会抢前台两秒）");
+  const r = await getJSON("/api/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to, text }) });
+  log(r.body?.out || r.body?.error || JSON.stringify(r.body));
+  $("btnSend").disabled = false;
+};
+
+$("btnOpenWeb").onclick = () => {
+  navigator.clipboard?.writeText(location.href);
+  log("地址已复制：" + location.href + "\n（在 DSH 面板里，这个按钮会直接用默认浏览器打开同一页）");
+};
+
+refresh();
+</script>
+</body>
+</html>
