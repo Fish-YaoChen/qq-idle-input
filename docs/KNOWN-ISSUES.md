@@ -83,3 +83,13 @@
 
 写完的脚本如果没 BOM，Windows PowerShell 会按 GBK 读，中文全烂、报 `Missing '=' operator` 这种莫名其妙的错。
 **每个 .ps1 保存后确认前三个字节是 `EF BB BF`。**
+
+## 十一、插件里 `spawn(process.execPath)` 拿到的不是 node
+
+**现象**：面板服务起来之后，进程命令行是 `"E:\DSH NEXT\DSH NEXT.exe" server.mjs`，不是 `node server.mjs`。
+
+**原因**：在 Electron 里 `process.execPath` 是宿主程序（DSH NEXT.exe），不是 node。脚本照样能跑（Electron 直接执行 JS），但这意味着：换了宿主、或者宿主加了限制，行为就不一样。
+
+**处理**：暂时接受。更稳的做法是找 DSH 提供的 node 路径，或者把面板服务改成 DSH 插件内部的一个模块（不另起进程）。等真出问题再说——现在它能跑。
+
+**另**：这也解释了「装进 `node_modules` 之后配置会被覆盖」那件事——面板的 cwd 在包里，所以配置得挪到 `~/.dsh/qq-idle/`。
