@@ -6,12 +6,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
+import os from "node:os";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const CORE = path.join(ROOT, "core");
 const TOOLS = path.resolve(ROOT, "..", "..", "tools");        // 现阶段 core 还在 tools 里
-const CONFIG = path.join(HERE, "config.json");
+// 配置放用户目录：装进 node_modules 之后，同目录的文件会被重装覆盖。
+const DATA_DIR = process.env.QQIDLE_DATA || path.join(os.homedir(), ".dsh", "qq-idle");
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const CONFIG = path.join(DATA_DIR, "config.json");
 const PORT = Number(process.env.QQIDLE_PORT || 8765);
 
 const DEFAULTS = {

@@ -64,6 +64,11 @@ if ($qqs.Count -eq 0) {
   if ($Uin) {
     $qqs = @($qqs | Where-Object { $_.CommandLine -like "*$Uin*" })
     if ($qqs.Count -eq 0) { Say "qqproc" "找到 QQ 进程" "fail" "没找到账号 $Uin 的进程" "去掉 -Uin 让它自己挑，或确认号对不对" }
+  } else {
+    # 没指定号时，优先挑带 --force-renderer-accessibility 的那个实例：
+    # 一台机器上可能登着两个号，另一个号没带参数，挑错了就会误报「读不可以」。11-20 踩过。
+    $withFlag = @($qqs | Where-Object { $_.CommandLine -like "*force-renderer-accessibility*" })
+    if ($withFlag.Count -gt 0) { $qqs = $withFlag }
   }
   if ($qqs.Count -gt 0) {
     # 挑主实例：命令行里有 background.js 的那个，不是一个 gpu/renderer 子进程
@@ -237,6 +242,10 @@ public static class __RC { [DllImport("user32.dll")] public static extern bool S
     }
     if ($missing.Count -eq 0) {
       Say "classnames" "五个关键类名都在" "ok" ($need.Keys -join "、") ""
+    } elseif ($all.Count -gt 50) {
+      # 会话列表读得到、元素也不少，却缺这几个——多半是**没打开任何聊天**，
+      # 输入框、气泡、发送按钮只在打开会话后才存在。这不该判「改版」。
+      Say "classnames" "五个关键类名都在" "warn" ("没打开会话，这几项现在看不到：" + ($missing -join "；")) "打开任意一个聊天，再跑一次自检；写的那项要等这时才能确认"
     } else {
       $hint3 = if ($all.Count -le 20) { "界面是空白的，先别当成改版——重启 QQ 再看" } else { "QQ 大概率改版了。把类名快照发出去，等人补适配" }
       Say "classnames" "五个关键类名都在" "fail" ("缺：" + ($missing -join "；")) $hint3
@@ -266,19 +275,24 @@ $verbose = @($results | Where-Object { $_.结果 -eq "fail" })
 
 # 能不能用，看实际读到了什么，而不是看「参数有没有带」——11-20 发现 Chromium 可能被 UIA 查询唤醒
 $canRead = (-not ($fail | Where-Object { $_.id -in @("os", "uia", "qqproc", "window", "tree", "classnames", "sessions") }))
-$canWrite = $canRead -and (-not ($fail | Where-Object { $_.id -in @("classnames") }))
+# 写要看两样：会话行认得出来 + 输入框/发送按钮真存在。
+# 没打开会话时那两样看不见，只能算「待确认」，不能报「可以」。
+$clsState = ($results | Where-Object { $_.id -eq "classnames" } | Select-Object -First 1).结果
+$canWrite = $canRead -and ($clsState -eq "ok")
+$writeLabel = if ($clsState -eq "ok") { "可以" } elseif ($canRead) { "待确认（先打开一个聊天）" } else { "不可以" }
 
 if ($Json) {
   [pscustomobject]@{
     可以读 = $canRead
     可以写 = $canWrite
+    写状态 = $writeLabel
     版本 = $version
     结果 = $results
   } | ConvertTo-Json -Depth 6
 } else {
   ""
   "———— 结论 ————"
-  "读：{0}    写：{1}" -f $(if ($canRead) { "可以" } else { "不可以" }), $(if ($canWrite) { "可以" } else { "不可以" })
+  "读：{0}    写：{1}" -f $(if ($canRead) { "可以" } else { "不可以" }), $writeLabel
   if ($fail.Count) { "没过的项：" + (($fail | ForEach-Object { $_.项目 }) -join "、") }
   if (-not $canWrite -and $canRead) { "写还要求输入框和发送按钮可用，上面都绿了才行" }
 }

@@ -43,20 +43,23 @@
       }
 
       function Panel() {
-        var s = react.useState({ running: false, port: 8765 }), svc = s[0], setSvc = s[1];
+        var s = react.useState({ running: false, port: 8765, uin: "" }), svc = s[0], setSvc = s[1];
+        var u = react.useState(""), uin = u[0], setUin = u[1];
         var d = react.useState(null), data = d[0], setData = d[1];
         var m = react.useState(""), msg = m[0], setMsg = m[1];
         var b = react.useState(false), busy = b[0], setBusy = b[1];
 
-        // 后台进程在不在 —— 走插件自己的路由，跟面板服务是否在跑无关
         function loadState() {
           return fetch(PREFIX + "/state", { cache: "no-store" })
             .then(function (r) { return r.json(); })
-            .then(function (body) { setSvc(body); return body; })
-            .catch(function () { setSvc({ running: false, port: 8765 }); });
+            .then(function (body) {
+              setSvc(body);
+              if (typeof body.uin === "string") setUin(body.uin);
+              return body;
+            })
+            .catch(function () { setSvc({ running: false, port: 8765, uin: "" }); });
         }
 
-        // 自检数据 —— 只有面板服务在跑时才拿得到
         function loadPanel() {
           fetch("http://127.0.0.1:8765/api/status", { cache: "no-store" })
             .then(function (r) { return r.json(); })
@@ -68,48 +71,81 @@
           setBusy(true);
           loadState().then(function (st) {
             if (st.running) loadPanel(); else setData(null);
-            setMsg("");
             setBusy(false);
           });
+        }
+
+        function saveUin() {
+          var v = String(uin || "").trim();
+          if (!v) { setMsg("QQ 号必填：填上才能启动后台进程。"); return Promise.resolve(false); }
+          if (!/^\d{5,12}$/.test(v)) { setMsg("QQ 号应该是 5–12 位数字。"); return Promise.resolve(false); }
+          return fetch(PREFIX + "/config", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ uin: v })
+          }).then(function (r) { return r.json(); }).then(function (body) {
+            if (body.ok) { setSvc(function (old) { return { ...old, uin: body.uin }; }); setMsg("QQ 号已保存：" + body.uin); return true; }
+            setMsg("保存失败：" + (body.error || "未知")); return false;
+          }).catch(function (e) { setMsg("保存失败：" + (e && e.message ? e.message : e)); return false; });
         }
 
         function startPanel() {
           setBusy(true);
           setMsg("正在启动后台进程…");
-          fetch(PREFIX + "/start", { method: "POST" })
-            .then(function (r) { return r.json(); })
-            .then(function (body) {
-              if (body.ok) {
-                setSvc({ running: true, port: body.port });
-                setMsg(body.already ? "后台进程本来就在跑。" : "已启动（PID " + body.pid + "）。");
-                loadPanel();
-              } else {
-                setMsg("启动失败：" + (body.error || "未知原因"));
-              }
-            })
-            .catch(function (e) { setMsg("启动失败：" + (e && e.message ? e.message : e)); })
-            .then(function () { setBusy(false); });
+          saveUin().then(function (ok) {
+            if (!ok) { setBusy(false); return; }
+            return fetch(PREFIX + "/start", { method: "POST" })
+              .then(function (r) { return r.json(); })
+              .then(function (body) {
+                if (body.ok) {
+                  setSvc({ running: true, port: body.port, uin: body.uin || uin });
+                  setMsg(body.already ? "后台进程本来就在跑（QQ " + (body.uin || uin) + "）。" : "已启动（PID " + body.pid + "），QQ " + (body.uin || uin) + "。");
+                  loadPanel();
+                } else {
+                  setMsg("启动失败：" + (body.error || "未知原因"));
+                }
+              })
+              .catch(function (e) { setMsg("启动失败：" + (e && e.message ? e.message : e)); })
+              .then(function () { setBusy(false); });
+          });
         }
 
         react.useEffect(function () { refresh(); }, []);
 
         var sc = data && data.selfcheck;
         var port = svc.port || 8765;
+        var canStart = String(uin || "").trim().length > 0;
+        if (data && data.selfcheck && data.selfcheck.uin) { /* 自检里的号与输入框同一个 */ }
 
         return h("div", { style: { padding: "4px 0 8px", fontFamily: '"Microsoft YaHei", system-ui, sans-serif' } },
           h("p", { style: { margin: "0 0 10px", fontSize: 13, color: "#6b7280" } },
             "读走 Windows 无障碍接口；写只在你手停的那一下抢两秒前台。白名单和会话都在网页那一页。"),
 
+          h("div", { style: { marginBottom: 12, display: "flex", alignItems: "center", gap: 8 } },
+            h("label", { style: { fontSize: 13, color: "#6b7280", minWidth: 72 } }, "QQ 号"),
+            h("input", {
+              value: uin,
+              placeholder: "要操作的那个号，例如 123456789",
+              onChange: function (e) { setUin(e.target.value); },
+              onBlur: function () { if (String(uin || "").trim()) saveUin(); },
+              style: {
+                width: 220, padding: "6px 10px", fontSize: 13, borderRadius: 8,
+                border: "1px solid #e3e6ec", background: "#fff", color: "#1f2329"
+              }
+            }),
+            h("span", { style: { fontSize: 12, color: canStart ? "#6b7280" : "#a16207" } },
+              canStart ? "改了之后会自动保存" : "必填——填上才能启动")
+          ),
+
           h("div", { style: { marginBottom: 10 } },
             chip(svc.running ? "后台进程 运行中" : "后台进程 没启动", svc.running ? "ok" : "bad"),
             chip("端口 " + port, ""),
             sc ? chip(sc.可以读 ? "读 可以" : "读 不可以", sc.可以读 ? "ok" : "bad") : null,
-            sc ? chip(sc.可以写 ? "写 可以" : "写 不可以", sc.可以写 ? "ok" : "bad") : null,
+            sc ? chip(sc.可以写 ? "写 可以" : (sc.写状态 || "写 待确认"), sc.可以写 ? "ok" : "warn") : null,
             sc && sc.版本 ? chip("版本 " + sc.版本, "") : null
           ),
 
           h("div", null,
-            button(svc.running ? "后台进程已在跑" : "启动后台进程", startPanel, !svc.running, busy || svc.running),
+            button(svc.running ? "后台进程已在跑" : "启动后台进程", startPanel, !svc.running, busy || svc.running || !canStart),
             button("打开网页设置", function () { window.open("http://127.0.0.1:" + port, "_blank"); }, false, !svc.running),
             button(busy ? "刷新中…" : "刷新", refresh, false, busy)
           ),
@@ -117,7 +153,7 @@
           msg ? h("p", { style: { marginTop: 10, fontSize: 12, color: "#6b7280" } }, msg) : null,
           !svc.running
             ? h("p", { style: { marginTop: 8, fontSize: 12, color: "#a16207" } },
-                "后台进程没起的时候，「打开网页设置」打不开——先点左边那个。")
+                "后台进程没起的时候，「打开网页设置」打不开——先填好 QQ 号，再点启动。")
             : null,
           data && data.at
             ? h("p", { style: { marginTop: 8, fontSize: 12, color: "#9aa1ad" } }, "上次自检：" + new Date(data.at).toLocaleTimeString())

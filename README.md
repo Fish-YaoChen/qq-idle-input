@@ -37,13 +37,15 @@ QQ 在跑、但没带这个参数时，也能读到一点点（Chromium 有时�
 
 ## 安装
 
-**还没发布到 npm。** 现在两种装法：
+**当成 DSH 插件用**（设置里多一个「传达室」）：
 
-1. **当 DSH 插件**（设置里多一个「传达室」）：把这个仓库下载下来，放进
-   `~/.dsh/profiles/desktop/node_modules/dsh-qq-idle`，再在 profile 的
-   `cordis.patch.yml` 里加一行 `- { id: dsh-qq-idle }`，重启 DSH。
-2. **只用命令行 / 接别的 agent**：下载仓库，核心脚本在 `core/`，面板在 `panel/`。
+```powershell
+cd ~/.dsh/profiles/desktop
+pnpm add dsh-qq-idle
+# 然后重启 DSH：设置 → 传达室
+```
 
+**只想用命令行 / 接别的 agent**：把仓库 clone 下来就行，核心脚本在 `core/`，面板在 `panel/`。
 
 ## 用法
 
@@ -123,7 +125,7 @@ MIT。见 [LICENSE](LICENSE)。
 
 ```powershell
 npm version patch      # 改版本
-npm publish  # 要 npm 账号 + 2FA，发布前确认 files 里没有 panel/config.json
+npm publish            # 发到 npm（要 npm 账号，且包名没被占）
 ```
 
 发布前确认三件事：`package.json` 的 `files` 里没有 `panel/config.json`（那里有会话昵称）；
