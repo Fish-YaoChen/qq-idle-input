@@ -75,6 +75,15 @@ powershell -File core\qq-repaint.ps1 -Uin 你的号 -DryRun   # 只看不动
 
 它是渲染层不画了，不是页面坏了。重启会掉注入，得重新注一遍；重画不用。（见 KNOWN-ISSUES 十二）
 
+**屏幕一块点不动**——多半是 QQ 的浮窗（资料卡之类）置顶了还看不见：
+
+```powershell
+powershell -File core\qq-popups.ps1          # 看有没有置顶浮窗
+powershell -File core\qq-popups.ps1 -Fix     # 关掉它
+```
+
+（见 KNOWN-ISSUES 十四）
+
 `-Json` 给结构化输出，agent 直接吃：
 
 ```powershell
