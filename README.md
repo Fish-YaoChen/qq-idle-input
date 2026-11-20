@@ -44,7 +44,6 @@ QQ 在跑、但没带这个参数时，也能读到一点点（Chromium 有时�
    `cordis.patch.yml` 里加一行 `- { id: dsh-qq-idle }`，重启 DSH。
 2. **只用命令行 / 接别的 agent**：下载仓库，核心脚本在 `core/`，面板在 `panel/`。
 
-**只想用命令行 / 接别的 agent**：把仓库 clone 下来就行，核心脚本在 `core/`，面板在 `panel/`。
 
 ## 用法
 
