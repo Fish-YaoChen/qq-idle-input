@@ -120,6 +120,17 @@
   </section>
 
   <section>
+    <h2>原文落盘 <span class="hint">（默认关；开会话会把你在看的聊天切走，所以不自动跑）</span></h2>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="togArchive"><span class="knob"></span>存原文</label>
+      <span class="label" style="width:64px">存到哪</span>
+      <input type="text" id="archiveDir" placeholder="留空 = ~/.dsh/qq-idle/messages" style="flex:1;min-width:260px" />
+      <button id="btnArchiveNow">现在落一次</button>
+    </div>
+    <div class="hint" style="margin-top:8px">只处理设成「可回」的会话，一行一条 jsonl：<code>{at, 时间, 谁, 内容}</code>。目录指到某个 world 的工作区，那个人格就能自己读——**这一步等于把聊天记录交给它**，想清楚再填。</div>
+  </section>
+
+  <section>
     <h2>结果</h2>
     <div class="log" id="log">还没刷新。</div>
   </section>
@@ -260,6 +271,9 @@ async function refresh() {
     $("togWrite").checked = !!cfg.write;
     $("groupTrigger").value = cfg.groupTrigger || "";
     $("uin").value = cfg.uin || "";
+    $("togArchive").checked = !!cfg.archive;
+    $("archiveDir").value = cfg.archiveDir || "";
+    $("btnArchiveNow").disabled = !cfg.archive;
   }
   const st = await getJSON("/api/status");
   setChips(st.body?.selfcheck);
@@ -317,10 +331,34 @@ $("btnStop").onclick = async () => {
 $("btnSaveCfg").onclick = async () => {
   const payload = {
     read: $("togRead").checked, write: $("togWrite").checked,
-    groupTrigger: $("groupTrigger").value.trim(), uin: $("uin").value.trim()
+    groupTrigger: $("groupTrigger").value.trim(), uin: $("uin").value.trim(),
+    archive: $("togArchive").checked, archiveDir: $("archiveDir").value.trim()
   };
   const r = await getJSON("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  if (r.status === 200) { cfg = r.body; log("设置已保存。"); } else log("保存失败：" + (r.body?.error || r.status));
+  if (r.status === 200) {
+    cfg = r.body;
+    $("btnArchiveNow").disabled = !cfg.archive;
+    log("设置已保存。");
+  } else log("保存失败：" + (r.body?.error || r.status));
+};
+
+// 落一次：只处理「可回」的会话。会点开会话——你正在看的聊天会被切走。
+$("btnArchiveNow").onclick = async () => {
+  $("btnArchiveNow").disabled = true;
+  log("正在落盘…（会依次点开「可回」的会话，聊天窗口会切来切去）");
+  try {
+    const r = await getJSON("/api/archive/run", { method: "POST" });
+    const b = r.body || {};
+    if (b.ok) {
+      const lines = [`写了 ${b.written ?? 0} 条，存到 ${b.at}`];
+      (b.明细 || []).forEach((x) => lines.push(`  ${x.会话}：新增 ${x.新增}`));
+      if (b.note) lines.push("  " + b.note);
+      log(lines.join("\n"));
+    } else log("落盘失败：" + (b.error || r.status));
+  } catch (e) {
+    log("落盘失败：" + (e && e.message ? e.message : e));
+  }
+  $("btnArchiveNow").disabled = !cfg || !cfg.archive;
 };
 
 $("btnSend").onclick = async () => {
