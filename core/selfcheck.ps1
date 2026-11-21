@@ -75,7 +75,7 @@ if ($qqs.Count -eq 0) {
     $all = @($qqs | Where-Object { $_.CommandLine -like "*background.js*" })
     if ($all.Count -eq 0) { $all = @($qqs) }
     # 多个号同时登着时，别静悄悄挑一个：把号打出来。
-    # 11-21 早上就吃过这个闷亏：自检验的是 2653935317，读会话读的却是 2727950855，
+    # 11-21 早上就吃过这个闷亏：自检验的是 A 号，读会话读的却是 B 号，
     # 两边数对不上，我还以为是树坏了。
     $uins = @($all | ForEach-Object {
       if ($_.CommandLine -match 'from-multiple-login\s+(\d+)') { $Matches[1] } else { '未知号' }

@@ -7,7 +7,7 @@
 #
 # 用法：
 #   .\qq-repaint.ps1            # 自动挑带 --force-renderer-accessibility 的实例
-#   .\qq-repaint.ps1 -Uin 2727950855
+#   .\qq-repaint.ps1 -Uin <你的号>
 #   .\qq-repaint.ps1 -DryRun    # 只报告窗口状态，不动
 
 [CmdletBinding()]

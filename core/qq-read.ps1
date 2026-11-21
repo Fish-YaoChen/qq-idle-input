@@ -7,7 +7,7 @@
 #   powershell -File qq-read.ps1                          # 列出会话（默认自动找小号那个进程）
 #   powershell -File qq-read.ps1 -Sessions                 # 只列会话
 #   powershell -File qq-read.ps1 -Open "妈妈" -Messages    # 点开会话读消息（Invoke，不碰鼠标）
-#   powershell -File qq-read.ps1 -Uin 2727950855 -Json     # 输出 JSON
+#   powershell -File qq-read.ps1 -Uin <你的号> -Json     # 输出 JSON
 #   powershell -File qq-read.ps1 -Open "小林" -Messages -Since   # 只吐上次之后的新消息
 #   powershell -File qq-read.ps1 -Open "小林" -Reset          # 把这个会话的游标清掉
 param(

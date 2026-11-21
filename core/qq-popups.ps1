@@ -9,7 +9,7 @@
 # 用法：
 #   .\qq-popups.ps1              # 只列
 #   .\qq-popups.ps1 -Fix         # 列并关掉
-#   .\qq-popups.ps1 -Uin 2727950855 -Fix
+#   .\qq-popups.ps1 -Uin <你的号> -Fix
 
 [CmdletBinding()]
 param(
