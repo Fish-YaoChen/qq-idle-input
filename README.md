@@ -143,6 +143,18 @@ powershell -File core\qq-send.ps1 -To "小林" -TextFile "$env:TEMP\m.txt" -Do
 **注意**：必须跑在 QQ 所在的那台 Windows、同一个登录用户下。云端、SSH、Docker、WSL 里读不到。
 `-Uin <号>` 指定操作哪个号；不指定时用默认的那个（多开时务必指定，否则可能抓到另一个号的窗口）。
 
+### 收消息：默认不靠桥
+
+「进来」有两条路，配置文件里 `inboundMode` 选：
+
+| 模式 | 怎么收 | 代价 |
+|---|---|---|
+| `uia`（默认） | 每 `pollSec` 秒（默认 45）看一次会话列表，有新动静就点开读一次，把这次读到的**全部新消息合成一条** | 会点开会话，你正在看的聊天被切走；频率别太高 |
+| `onebot` | 连 SnowLuma / OpenQQ 的 OneBot WebSocket（`onebotWs` + `onebotToken`），推送，不点窗口 | **桥没了这条路就没了**，所以不是默认 |
+
+为什么默认是 `uia`：这个项目存在的意义就是「桥死那天还能用」。收消息的命脉接在桥上，等于白做。
+
+合并后写成一条：`{at, 会话, 条数, 内容, 分段[]}`，落进 `<存档目录>/inbox/<日期>.jsonl`，同时能从 `GET /api/inbox` 取。
 ### 走面板的 REST 也行
 
 面板起来之后（`node panel\server.mjs`，默认 `127.0.0.1:8765`）：
@@ -155,6 +167,8 @@ powershell -File core\qq-send.ps1 -To "小林" -TextFile "$env:TEMP\m.txt" -Do
 | `POST /api/send` | `{to, text}`，只对「可回」的会话生效 |
 | `POST /api/archive/run` | 把「可回」会话的新消息落到 `messages/<昵称>/<日期>.jsonl`（不常驻，手动触发） |
 | `GET /api/health` | 窗口体检：元素数、文本节点数、有没有置顶浮窗 |
+| `GET /api/inbox?since=N` | 后台合并好的消息（对方连发几条合成一条），`since` 是取过第几条之后的 |
+| `POST /api/inbox/feed` | 灌一条假事件，专门验合并逻辑（只本机用） |
 | `POST /api/shutdown` | 面板自己退 |
 ## 面板（传达室）
 
