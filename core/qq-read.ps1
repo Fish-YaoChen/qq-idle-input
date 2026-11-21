@@ -76,7 +76,9 @@ $proc = Get-CimInstance Win32_Process -Filter "Name='QQ.exe'" |
 if (-not $proc) { Write-Error "没找到 QQ $Uin 的进程"; exit 2 }
 $pidQQ = [uint32]$proc.ProcessId
 if (-not ($proc.CommandLine -like "*force-renderer-accessibility*")) {
-  Write-Warning "这个实例没带 --force-renderer-accessibility。窗口渲染过一次之后树多半还在（11-21 实测），读不通再加这个参数。"
+  # 11-21：Write-Warning 在 -Command 调用下会跑到 stdout，把 JSON 污染成「警告 + JSON」，
+  # 面板那边 JSON.parse 直接失败（sessions 变成空数组）。-Json 时就不打这句。
+  if (-not $Json) { Write-Warning "这个实例没带 --force-renderer-accessibility。窗口渲染过一次之后树多半还在（11-21 实测），读不通再加这个参数。" }
 }
 $hwnd = [QQWin]::FindByPid($pidQQ)
 if ($hwnd -eq [IntPtr]::Zero) { Write-Error "没找到 $Uin 的窗口"; exit 3 }

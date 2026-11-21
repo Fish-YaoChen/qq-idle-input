@@ -233,7 +233,7 @@ function renderSessions(list) {
         <button data-state="read" class="${state === "read" ? "on" : ""}">只读</button>
         <button data-state="reply" class="${state === "reply" ? "on" : ""}">可回</button>
       </span>`;
-    li.querySelector(".who").textContent = name + (count[name] > 1 ? " ⚠重名" : "");
+    li.querySelector(".who").textContent = (s.新 ? "● " : "") + name + (count[name] > 1 ? " ⚠重名" : "");
     li.querySelector(".preview").textContent = prev;
     li.querySelector(".when").textContent = s.时间 || "";
     li.querySelectorAll(".tabs button").forEach((b) => {

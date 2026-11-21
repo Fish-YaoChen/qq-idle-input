@@ -55,6 +55,25 @@ function ps(script, args = [], timeoutMs = 20000) {
   });
 }
 
+// 从一坨输出里把 JSON 挖出来。
+// 11-21：PowerShell 的 Write-Warning 在 -Command 调用下是往 **stdout** 写的，
+// 于是 stdout 变成「警告: …\n[\n {…}\n]」，JSON.parse 直接失败、会话列表变空。
+// 脚本那边已经改成 -Json 时不打警告，这里再兜一层：从第一个 [ / { 截到最后一个 ] / }。
+function pickJson(text) {
+  const t = String(text || "").trim();
+  const tryParse = (s) => { try { return JSON.parse(s); } catch { return undefined; } };
+  const direct = tryParse(t);
+  if (direct !== undefined) return direct;
+  for (const [open, close] of [["[", "]"], ["{", "}"]]) {
+    const i = t.indexOf(open), j = t.lastIndexOf(close);
+    if (i >= 0 && j > i) {
+      const v = tryParse(t.slice(i, j + 1));
+      if (v !== undefined) return v;
+    }
+  }
+  return undefined;
+}
+
 // DSH 的设置页在另一个源（端口不同），所以面板接口要允许跨源访问。
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -102,7 +121,7 @@ const server = http.createServer(async (req, res) => {
     if (cfg.uin) args.push("-Uin", cfg.uin);
     const r = await ps("selfcheck.ps1", args, 30000);
     let parsed = null;
-    try { parsed = JSON.parse(r.stdout); } catch {}
+    parsed = pickJson(r.stdout);
     return json(res, 200, {
       ok: !!parsed,
       selfcheck: parsed,
@@ -114,7 +133,7 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/sessions") {
     const r = await ps("qq-read.ps1", ["-Sessions", "-Json"], 25000);
     let list = [];
-    try { list = JSON.parse(r.stdout); } catch {}
+    list = pickJson(r.stdout);
     if (!Array.isArray(list)) list = list ? [list] : [];
     const cfg = loadConfig();
     for (const s of list) s.状态 = cfg.sessions[s.会话] || "off";

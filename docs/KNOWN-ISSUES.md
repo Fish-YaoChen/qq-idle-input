@@ -169,3 +169,41 @@
 **处理**：`Open-Session` 先看顶部：已经是这个人就直接读，**一次都不点**；不是才点，点完最多等 3 秒轮询标题（聊天区是懒渲染的，600ms 未必画好）。标题对不上就停手，一个字都不往下做。
 
 **顺带**：这也是「按名字找元素」彻底退役的原因——那个名字第一个匹配到的常常是顶部自己的昵称或者气泡里的头像名，点下去等于没点。现在只认会话行（`recent-contact-item`），行里第一个文本等于目标才算命中。
+
+## 十八、`Write-Warning` 会跑到 stdout，把面板的 JSON 打烂
+
+**现象**：面板 `/api/sessions` 一直返回 `{"ok":true,"sessions":[]}`——九行会话一个都没有，可命令行里跑同一条命令好好的。
+
+**原因**：面板是用 `powershell -NoProfile -Command "& script.ps1 -Sessions -Json"` 调的。这种调法下，`Write-Warning` 写的是 **stdout**（不是 stderr），于是 stdout 变成：
+
+```
+警告: 这个实例没带 --force-renderer-accessibility。…
+[
+  { "会话": "辰", … }
+]
+```
+
+`JSON.parse` 从第一个字符就失败，`sessions` 变空数组——**面板看着「没有会话」，实际上 QQ 好好的**。
+
+**处理**：
+- `qq-read.ps1`：`-Json` 时不打这句警告（人看的模式照打）。
+- `panel/server.mjs`：加 `pickJson()`，从第一个 `[` / `{` 截到最后一个 `]` / `}` 再解析，兜住任何前缀噪音。
+
+**教训**：「命令行跑得通」不等于「调它的那个进程也能用」——中间还隔着一层**输出流怎么分**。
+
+## 十九、`Set-Content -Encoding UTF8` 在 PowerShell 7 里**不写 BOM**
+
+**现象**：`qq-read.ps1` 在 pwsh 7 里跑得好好的，面板一调就报一堆语法错（`使用 System; 必须出现在…之前`、`Unexpected token '}'`）。
+
+**原因**：我用 `Set-Content -Encoding UTF8` 改了脚本，**PowerShell 7 的这个写法不写 BOM**。面板调的是 Windows PowerShell 5.1，没 BOM 就按 GBK 读，中文注释全烂，语法跟着崩。
+
+**处理**：改完任何 `.ps1` 都要核前三个字节是不是 `EF BB BF`。批量核一遍：
+
+```powershell
+Get-ChildItem *.ps1 | ForEach-Object {
+  $b = [IO.File]::ReadAllBytes($_.FullName)
+  if (-not ($b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)) { "缺 BOM：$($_.Name)" }
+}
+```
+
+这条跟第十条是同一个坑的第二次——**第一次是写文件时忘了，第二次是「以为 Set-Content 会写」**。
