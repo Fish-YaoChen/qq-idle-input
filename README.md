@@ -99,14 +99,61 @@ powershell -File core\selfcheck.ps1 -Json
 
 ## 接自己的 agent
 
-任何能执行命令的 agent 都行（Claude Code、Codex CLI、Cursor、Aider……）：
+任何能执行命令的 agent 都行（Claude Code、Codex CLI、Cursor、Aider……）。三条命令，`core\` 下的脚本，输出都是 JSON。
 
-- 读：跑 `qq-read.ps1 ... -Json`，解析 JSON
-- 写：把文本写进一个临时文件，跑 `qq-send.ps1 -To "某人" -TextFile 那个文件 -Do`（避开命令行转义）
-- 面板：`node panel\server.mjs`，`PUT /api/config` 改开关和白名单，`POST /api/send` 发消息
+**① 谁在找我**
 
-**注意**：它必须跑在 QQ 所在的那台 Windows、同一个登录用户下。云端、SSH、Docker、WSL 里读不到。
+```powershell
+powershell -File core\qq-read.ps1 -Sessions -Json
+```
 
+```json
+[ { "会话": "小林", "时间": "22:41", "预览": "明天的会我改到三点了", "新": true } ]
+```
+
+`新` 是「跟上次比有没有动静」。**第一次跑是记基线（全是 true），第二次起才是增量。** 状态存在 `~/.dsh/qq-idle/sessions.json`。
+
+**② 读某个会话的新消息**
+
+```powershell
+powershell -File core\qq-read.ps1 -Open "小林" -Messages -Since -Json
+```
+
+```json
+[ { "时间": "22:41", "谁": "对方", "内容": "明天的会我改到三点了" } ]
+```
+
+只给游标之后的；没有新消息就是 `[]`。游标在 `~/.dsh/qq-idle/cursor.json`，`-Reset` 清掉某个会话的游标，从头再来。
+
+**代价说清楚**：读消息要**点开那个会话**——你正在看的聊天会被切走（窗口藏在托盘时会先显示出来，但**不抢焦点**）。所以这条命令别放进每秒轮询的循环里。
+
+**③ 发一条**
+
+```powershell
+# 先把内容写进文件，避开命令行转义（中文、引号、换行都安全）
+"桥掉了，我先看着，别急。" | Out-File -Encoding utf8 "$env:TEMP\m.txt"
+powershell -File core\qq-send.ps1 -To "小林" -TextFile "$env:TEMP\m.txt" -Do
+```
+
+不带 `-Do` 是**演练**：只算一遍、不真发。真发会**抢前台约两秒**，全屏程序可能被最小化且**还原不回来**——别在全屏游戏里用。
+发送前后脚本会核对「聊天窗口顶部是不是这个人」和「发完输入框是不是空了」，对不上就停手。
+
+**注意**：必须跑在 QQ 所在的那台 Windows、同一个登录用户下。云端、SSH、Docker、WSL 里读不到。
+`-Uin <号>` 指定操作哪个号；不指定时用默认的那个（多开时务必指定，否则可能抓到另一个号的窗口）。
+
+### 走面板的 REST 也行
+
+面板起来之后（`node panel\server.mjs`，默认 `127.0.0.1:8765`）：
+
+| 接口 | 干什么 |
+|---|---|
+| `GET /api/status` | 自检结果（读/写能不能用、版本） |
+| `GET /api/sessions` | 会话列表，每条带 `新` 和 `状态` |
+| `PUT /api/config` | 改开关和白名单（`{read, write, uin, groupTrigger, sessions}`） |
+| `POST /api/send` | `{to, text}`，只对「可回」的会话生效 |
+| `POST /api/archive/run` | 把「可回」会话的新消息落到 `messages/<昵称>/<日期>.jsonl`（不常驻，手动触发） |
+| `GET /api/health` | 窗口体检：元素数、文本节点数、有没有置顶浮窗 |
+| `POST /api/shutdown` | 面板自己退 |
 ## 面板（传达室）
 
 `panel/server.mjs` + `panel/index.html`，零依赖。
