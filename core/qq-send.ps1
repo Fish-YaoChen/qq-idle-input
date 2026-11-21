@@ -256,7 +256,7 @@ if (-not $isFront) {
 $head = $Text.Substring(0, [Math]::Min(6, $Text.Length))
 
 # 11-21：原来只等 300ms 读一次，读不到就整段重打——可第一遍的字其实已经在框里了，
-# 于是对方收到两遍（实测「轮询测试：一、二、三。」发出去是两倍）。
+# 于是对方收到两遍（实测「测试消息 A。」发出去是两倍）。
 # 现在改成：读不到就**多等一会儿再读**（最多 2 秒），并且检查框里是不是已经重复。
 function Get-EditorDoc {
   $w = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)

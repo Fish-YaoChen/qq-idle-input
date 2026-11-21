@@ -4,7 +4,7 @@
 # 它只读：不进会话、不发消息、不动焦点。要给会话发消息用 qq-send.ps1。
 #
 # 用法：
-#   powershell -File qq-read.ps1                          # 列出会话（默认自动找小肥鱼那个进程）
+#   powershell -File qq-read.ps1                          # 列出会话（默认自动找小号那个进程）
 #   powershell -File qq-read.ps1 -Sessions                 # 只列会话
 #   powershell -File qq-read.ps1 -Open "妈妈" -Messages    # 点开会话读消息（Invoke，不碰鼠标）
 #   powershell -File qq-read.ps1 -Uin 2727950855 -Json     # 输出 JSON
