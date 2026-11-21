@@ -1,4 +1,4 @@
-﻿// 传达室 · 面板服务
+// 传达室 · 面板服务
 // 一个文件的小服务器：把你机器上的 QQ 收进来，让 agent 和白名单管住「听」和「说」。
 // 只用 node 内置模块，不装依赖。读全部走 core 里的 PowerShell（那套已经验过）。
 import http from "node:http";
@@ -137,6 +137,18 @@ const server = http.createServer(async (req, res) => {
     const r = await ps("qq-send.ps1", ["-To", to, "-TextFile", tmp, "-Do"], 40000);
     try { fs.unlinkSync(tmp); } catch {}
     return json(res, r.ok ? 200 : 500, { ok: r.ok, out: (r.stdout + r.stderr).slice(-1200) });
+  }
+
+  // 停止自己：先回话，再关服务器退出。
+  // 11-21 加：以前要停它，得由外面的人去 taskkill，插件那侧还不知道 pid 是不是面板。
+  // 自己停最干净——它本来就只是个本地面板，DSH 关了它也没理由留着。
+  if (p === "/api/shutdown" && req.method === "POST") {
+    json(res, 200, { ok: true, pid: process.pid, msg: "停止了，这个页面可以关掉" });
+    setTimeout(() => {
+      try { server.close(); } catch {}
+      setTimeout(() => process.exit(0), 120);
+    }, 150);
+    return;
   }
 
   json(res, 404, { error: "没有这个接口" });

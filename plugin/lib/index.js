@@ -64,7 +64,21 @@ function startPanel() {
     env: { ...process.env, QQIDLE_PORT: String(PORT), QQIDLE_DATA: DATA_DIR }
   });
   child.unref();
+  // 记下自己起的 pid：停止时要靠它，否则只能去 netstat 里猜哪个进程占了 8765。
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(pidFile(), String(child.pid)); } catch {}
   return child.pid;
+}
+
+// ---- 记着自己起的是哪个进程 ----
+function pidFile() { return path.join(DATA_DIR, "panel.pid"); }
+function readPid() {
+  try {
+    const n = Number(fs.readFileSync(pidFile(), "utf8").trim());
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch { return null; }
+}
+function alive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
 export function apply(ctx) {
@@ -105,6 +119,30 @@ export function apply(ctx) {
             if (await probe(PORT)) return send(res, 200, { ok: true, running: true, pid, port: PORT, uin });
           }
           return send(res, 500, { ok: false, error: "起了进程但端口没监听，可能启动失败", pid });
+        }
+        // 停止：请面板自己退（POST /api/shutdown），它愿意退就干净退；
+        // 三秒后端口还在监听，再按 pid 兜一次。不认端口上跑的到底是什么进程之前不动手。
+        if (req.method === "POST" && sub === "/stop") {
+          if (!(await probe(PORT))) return send(res, 200, { ok: true, running: false, already: true });
+          let asked = false;
+          try {
+            await fetch(`http://127.0.0.1:${PORT}/api/shutdown`, { method: "POST" });
+            asked = true;
+          } catch { asked = false; }
+          for (let i = 0; i < 20; i++) {
+            await new Promise((r) => setTimeout(r, 150));
+            if (!(await probe(PORT))) return send(res, 200, { ok: true, running: false, asked, port: PORT });
+          }
+          const pid = readPid();
+          if (pid && alive(pid)) {
+            try { process.kill(pid); } catch {}
+            for (let i = 0; i < 10; i++) {
+              await new Promise((r) => setTimeout(r, 150));
+              if (!(await probe(PORT))) return send(res, 200, { ok: true, running: false, killed: pid, port: PORT });
+            }
+            return send(res, 500, { ok: false, error: `已经 kill ${pid}，但端口还开着`, port: PORT });
+          }
+          return send(res, 500, { ok: false, error: "端口还在监听，但我没记着是谁起的（老版本起的进程没有 pid 记录）。用 taskkill 收一下。" });
         }
         if (req.method === "GET" && sub === "/") {
           return send(res, 200, { ok: true, name, port: PORT, panel: `http://127.0.0.1:${PORT}` });

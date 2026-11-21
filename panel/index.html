@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
@@ -73,6 +73,7 @@
   <span class="spacer"></span>
   <button id="btnOpenWeb">打开网页设置</button>
   <button id="btnRefresh" class="primary">刷新</button>
+  <button id="btnStop" title="关掉这个后台进程（页面就没用了，可以关）">停止后台进程</button>
 </header>
 
 <main>
@@ -271,6 +272,20 @@ async function refresh() {
 }
 
 $("btnRefresh").onclick = refresh;
+
+// 停止自己：先让页面上说清楚，再请服务退。
+// 它退掉之后这个页面就废了（刷新会连不上），所以按钮点完就禁用，不留二次点击。
+$("btnStop").onclick = async () => {
+  if (!confirm("停止后台进程？停了之后这个页面就没用了，可以关掉。要再用，去 DSH 设置里点「启动后台进程」。")) return;
+  $("btnStop").disabled = true;
+  $("btnRefresh").disabled = true;
+  try {
+    const r = await getJSON("/api/shutdown", { method: "POST" });
+    log(r.status === 200 ? "已停止（PID " + (r.body?.pid ?? "?") + "）。这个页面可以关掉了。" : "停止失败：" + (r.body?.error || r.status));
+  } catch (e) {
+    log("已停止。这个页面可以关掉了。");
+  }
+};
 
 $("btnSaveCfg").onclick = async () => {
   const payload = {

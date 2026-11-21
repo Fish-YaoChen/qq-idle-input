@@ -109,6 +109,23 @@
           });
         }
 
+        function stopPanel() {
+          setBusy(true);
+          setMsg("正在停止后台进程…");
+          fetch(PREFIX + "/stop", { method: "POST" })
+            .then(function (r) { return r.json(); })
+            .then(function (body) {
+              if (body.ok) {
+                setSvc(function (old) { return { ...old, running: false }; });
+                setMsg("已停止。要再用就点「启动后台进程」。");
+              } else {
+                setMsg("停止失败：" + (body.error || "未知原因"));
+              }
+            })
+            .catch(function (e) { setMsg("停止失败：" + (e && e.message ? e.message : e)); })
+            .then(function () { setBusy(false); });
+        }
+
         react.useEffect(function () { refresh(); }, []);
 
         var sc = data && data.selfcheck;
@@ -146,6 +163,7 @@
 
           h("div", null,
             button(svc.running ? "后台进程已在跑" : "启动后台进程", startPanel, !svc.running, busy || svc.running || !canStart),
+            button("停止后台进程", stopPanel, false, busy || !svc.running),
             button("打开网页设置", function () { window.open("http://127.0.0.1:" + port, "_blank"); }, false, !svc.running),
             button(busy ? "刷新中…" : "刷新", refresh, false, busy)
           ),

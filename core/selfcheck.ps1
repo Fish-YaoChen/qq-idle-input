@@ -72,10 +72,22 @@ if ($qqs.Count -eq 0) {
   }
   if ($qqs.Count -gt 0) {
     # 挑主实例：命令行里有 background.js 的那个，不是一个 gpu/renderer 子进程
-    $main = @($qqs | Where-Object { $_.CommandLine -like "*background.js*" } | Select-Object -First 1)
-    if ($main.Count -eq 0) { $main = @($qqs[0]) }
+    $all = @($qqs | Where-Object { $_.CommandLine -like "*background.js*" })
+    if ($all.Count -eq 0) { $all = @($qqs) }
+    # 多个号同时登着时，别静悄悄挑一个：把号打出来。
+    # 11-21 早上就吃过这个闷亏：自检验的是 2653935317，读会话读的却是 2727950855，
+    # 两边数对不上，我还以为是树坏了。
+    $uins = @($all | ForEach-Object {
+      if ($_.CommandLine -match 'from-multiple-login\s+(\d+)') { $Matches[1] } else { '未知号' }
+    })
+    $main = @($all | Select-Object -First 1)
     $qqPid = [int]$main[0].ProcessId
-    Say "qqproc" "找到 QQ 进程" "ok" "PID=$qqPid（另外 $($qqs.Count - 1) 个相关进程）" ""
+    $who = if ($main[0].CommandLine -match 'from-multiple-login\s+(\d+)') { $Matches[1] } else { '共用一个实例' }
+    if ($uins.Count -gt 1) {
+      Say "qqproc" "找到 QQ 进程" "warn" "PID=$qqPid（登录号 $who）" "这台机器上同时登着 $($uins -join '、')，这次只验了 $who；要验另一个用 -Uin 指定"
+    } else {
+      Say "qqproc" "找到 QQ 进程" "ok" "PID=$qqPid（登录号 $who）" ""
+    }
   }
 }
 
@@ -120,7 +132,7 @@ if ($hasFlag) {
   $base = '"' + $exePath + '"'
   $asarPath = if ($isElectron) { (Get-ChildItem (Split-Path $exePath -Parent) -Recurse -Depth 3 -Filter "background.js" -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*application.asar*" } | Select-Object -First 1).FullName } else { "" }
   $hint = if ($asarPath) { "关掉 QQ，再用这条命令启动：`n     `"$exePath`" `"$asarPath`" --force-renderer-accessibility --disable-renderer-backgrounding" } else { "关掉 QQ，用带 --force-renderer-accessibility 的方式重新启动" }
-  Say "flag" "带无障碍参数启动" "fail" "没有这个参数，读到的界面树是空的" $hint
+  Say "flag" "带无障碍参数启动" "warn" "没带这个参数" "11-21 实测：窗口渲染过一次之后，树一直留着，不带参数也能读。参数的作用是让树一开始就建好（不用先把窗口拉出来看一次）。读到底行不行，看下面「无障碍树」那项。"
 }
 
 # ---------- 7/8. 窗口与无障碍树 ----------

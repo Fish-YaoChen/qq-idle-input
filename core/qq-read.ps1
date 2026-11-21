@@ -70,7 +70,7 @@ $proc = Get-CimInstance Win32_Process -Filter "Name='QQ.exe'" |
 if (-not $proc) { Write-Error "没找到 QQ $Uin 的进程"; exit 2 }
 $pidQQ = [uint32]$proc.ProcessId
 if (-not ($proc.CommandLine -like "*force-renderer-accessibility*")) {
-  Write-Warning "这个进程没有 --force-renderer-accessibility，无障碍树可能是空的"
+  Write-Warning "这个实例没带 --force-renderer-accessibility。窗口渲染过一次之后树多半还在（11-21 实测），读不通再加这个参数。"
 }
 $hwnd = [QQWin]::FindByPid($pidQQ)
 if ($hwnd -eq [IntPtr]::Zero) { Write-Error "没找到 $Uin 的窗口"; exit 3 }
