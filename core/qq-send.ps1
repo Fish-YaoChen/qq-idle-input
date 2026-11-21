@@ -254,6 +254,28 @@ if (-not $isFront) {
 }
 
 $head = $Text.Substring(0, [Math]::Min(6, $Text.Length))
+
+# 11-21：原来只等 300ms 读一次，读不到就整段重打——可第一遍的字其实已经在框里了，
+# 于是对方收到两遍（实测「轮询测试：一、二、三。」发出去是两倍）。
+# 现在改成：读不到就**多等一会儿再读**（最多 2 秒），并且检查框里是不是已经重复。
+function Get-EditorDoc {
+  $w = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+  $ed = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
+    Where-Object { $_.Current.ClassName -like "*ExEditor*" } | Select-Object -First 1
+  if (-not $ed) { return "" }
+  try { return $ed.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern).DocumentRange.GetText(600) } catch { return "" }
+}
+
+function Wait-Doc([string]$needle, [int]$ms) {
+  $deadline = (Get-Date).AddMilliseconds($ms)
+  while ((Get-Date) -lt $deadline) {
+    $d = Get-EditorDoc
+    if ($d -and $d.Contains($needle)) { return $d }
+    Start-Sleep -Milliseconds 150
+  }
+  return (Get-EditorDoc)
+}
+
 $got = $false
 for ($attempt = 1; $attempt -le 2 -and -not $got; $attempt++) {
   $winE = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
@@ -265,15 +287,18 @@ for ($attempt = 1; $attempt -le 2 -and -not $got; $attempt++) {
   [QQS]::CtrlA()          # 先把可能残留的草稿全选，下面打字直接覆盖
   Start-Sleep -Milliseconds 120
   Type-Text $Text 12
-  Start-Sleep -Milliseconds 300
-  $winE = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-  $ed = $winE.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
-    Where-Object { $_.Current.ClassName -like "*ExEditor*" } | Select-Object -First 1
-  if ($ed) {
-    try { $doc = $ed.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern).DocumentRange.GetText(600) } catch { $doc = "" }
-    if ($doc -and $doc.Contains($head)) { $got = $true }
+  $doc = Wait-Doc $head 2000
+  if ($doc -and $doc.Contains($head)) {
+    $n = ([regex]::Matches($doc, [regex]::Escape($head))).Count
+    $len = ($doc -replace '\s', '').Length
+    if ($n -gt 1 -or $len -gt ($Text.Length * 1.5 + 6)) {
+      Log "第 $attempt 次：框里像是打重了（开头出现 $n 次、长度 $len），先清掉再来"
+    } else {
+      $got = $true
+    }
+  } else {
+    Log "第 $attempt 次：等了两秒还没读到字"
   }
-  if (-not $got) { Log "第 $attempt 次没打进去，再来一次" }
 }
 
 # ---- 7. 确认字真的进去了，才按回车 ----
