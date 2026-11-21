@@ -188,14 +188,17 @@ function Open-Session([string]$name) {
 
   # 核对：顶部名字对不对。不对就一个字都不往下做。
   # 11-21：聊天区是懒渲染的，点完 600ms 未必已经有标题——轮询 3 秒，别一缺就判「没进对」。
+  # 11-21 修：原来轮询写的是「只要有标题就 break」——标题本来就在（还是上一个会话的），
+  # 于是立刻拿旧标题比较、判「没切过去」。现在要**等到顶部变成目标名字**才算数。
   $hdr = $null
-  for ($k = 0; $k -lt 8; $k++) {
+  for ($k = 0; $k -lt 12; $k++) {
+    Start-Sleep -Milliseconds 300
     $now = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
     $hdr = $now | Where-Object { $_.Current.ClassName -eq "chat-header__contact-name" } | Select-Object -First 1
-    if ($hdr) { break }
-    Start-Sleep -Milliseconds 400
+    if ($hdr -and $hdr.Current.Name -eq $name) { break }
+    $hdr = $null
   }
-  if (-not $hdr) { Write-Error "点了「$name」，但三秒内聊天窗口顶部都没出现名字——不确定进没进对会话，停手"; return $false }
+  if (-not $hdr) { Write-Error "点了「$name」，三秒多之后顶部还没变成它——不确定进没进对会话，停手"; return $false }
   $who = $hdr.Current.Name
   if ($who -ne $name) { Write-Error "顶部是「$who」，不是「$name」——不往下做了"; return $false }
   return $true
