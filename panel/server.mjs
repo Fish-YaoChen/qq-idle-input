@@ -170,6 +170,30 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // 窗口体检：一次看两件事——主窗还在不在画（元素/文本节点数），有没有置顶浮窗挡着。
+  // 11-21 加的：这两天「QQ 白了」「屏幕一块点不动」都是这两件事，每次翻命令行太慢。
+  if (p === "/api/health") {
+    const cfg = loadConfig();
+    const uin = String(cfg.uin || "").trim();
+    // 填了 QQ 号就只看那个号——两个号同时登着时，不指定就会验到另一个（11-21 踩过）。
+    const rpArgs = uin ? ["-DryRun", "-Uin", uin] : ["-DryRun"];
+    const [rp, pu] = await Promise.all([
+      ps("qq-repaint.ps1", rpArgs, 25000),
+      ps("qq-popups.ps1", [], 25000)
+    ]);
+    const t1 = (rp.stdout + "\n" + rp.stderr).trim();
+    const t2 = (pu.stdout + "\n" + pu.stderr).trim();
+    const m = t1.match(/元素=(\d+)\s+文本节点=(\d+)/);
+    return json(res, 200, {
+      ok: true,
+      元素: m ? Number(m[1]) : null,
+      文本节点: m ? Number(m[2]) : null,
+      有浮窗: /浮窗「/.test(t2),
+      窗口: t1.split("\n").filter(Boolean).slice(-3),
+      浮窗: t2.split("\n").filter(Boolean).slice(-6)
+    });
+  }
+
   json(res, 404, { error: "没有这个接口" });
 });
 

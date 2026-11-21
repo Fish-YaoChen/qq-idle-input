@@ -72,7 +72,7 @@ powershell -File core\qq-send.ps1 -To "某人" -Text "你好" -Do
 node panel\server.mjs      # 然后打开 http://127.0.0.1:8765
 ```
 
-**窗口白了（一片白、点不动，但读还是好的）**——先跑这个，别急着重启 QQ：
+**窗口白了 / 屏幕一块点不动**——面板上有「窗口体检」按钮，一次看完两件事（元素数、有没有置顶浮窗）。命令行也行：
 
 ```powershell
 powershell -File core\qq-repaint.ps1        # 还原窗口 + 抖一像素，逼它重画

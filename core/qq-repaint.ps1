@@ -66,12 +66,16 @@ function Get-Count([IntPtr]$h) {
 }
 
 # ---- 找实例 ----
-$procs = Get-CimInstance Win32_Process -Filter "Name='QQ.exe'" | Where-Object {
-  $_.CommandLine -match '--force-renderer-accessibility' -and ($Uin -eq '' -or $_.CommandLine -match $Uin)
-}
-if (-not $procs) {
-  if ($Uin -ne '') { Write-Host "没找到带无障碍参数、且登录 $Uin 的 QQ 实例。" -ForegroundColor Red }
-  else { Write-Host "没找到带 --force-renderer-accessibility 的 QQ 实例——它读不了，先按 README 带参数重启。" -ForegroundColor Red }
+# 11-21 改：不再要求「必须带 --force-renderer-accessibility」。窗口渲染过一次之后树就在，
+# 不带参数照样能读（见 KNOWN-ISSUES 十五）。带参数的优先挑，没有就用普通实例。
+$all = @(Get-CimInstance Win32_Process -Filter "Name='QQ.exe'" | Where-Object {
+  $_.CommandLine -match 'from-multiple-login\s+\d+' -and ($Uin -eq '' -or $_.CommandLine -match $Uin)
+})
+$procs = @($all | Where-Object { $_.CommandLine -match '--force-renderer-accessibility' })
+if ($procs.Count -eq 0) { $procs = $all }
+if ($procs.Count -eq 0) {
+  if ($Uin -ne '') { Write-Host "没找到登录 $Uin 的 QQ 实例。" -ForegroundColor Red }
+  else { Write-Host "没找到 QQ 实例——QQ 没开。" -ForegroundColor Red }
   exit 1
 }
 $qqPid = ($procs | Select-Object -First 1).ProcessId

@@ -72,6 +72,7 @@
   <span id="chipVer" class="chip">版本 ?</span>
   <span class="spacer"></span>
   <button id="btnOpenWeb">打开网页设置</button>
+  <button id="btnHealth">窗口体检</button>
   <button id="btnRefresh" class="primary">刷新</button>
   <button id="btnStop" title="关掉这个后台进程（页面就没用了，可以关）">停止后台进程</button>
 </header>
@@ -272,6 +273,32 @@ async function refresh() {
 }
 
 $("btnRefresh").onclick = refresh;
+
+// 窗口体检：QQ 白了、屏幕一块点不动，都是「主窗不画了」和「置顶浮窗挡着」这两件事。
+// 这里一次跑两个脚本，把数字和结论直接摆出来，省得去翻命令行。
+$("btnHealth").onclick = async () => {
+  $("btnHealth").disabled = true;
+  log("体检中…（要读一次窗口，两三秒）");
+  try {
+    const r = await getJSON("/api/health");
+    const b = r.body || {};
+    const lines = [];
+    if (b.文本节点 === null || b.文本节点 === undefined) {
+      lines.push("读不到窗口数字——QQ 可能没开，或者进程不是带无障碍参数的那个。");
+    } else if (b.文本节点 > 0) {
+      lines.push(`窗口是好的：${b.元素} 个元素、${b.文本节点} 个文本节点。`);
+    } else {
+      lines.push(`窗口里一个文本都没有（${b.元素 ?? "?"} 个元素）——多半是白屏了，去 DSH 外面跑 qq-repaint.ps1。`);
+    }
+    lines.push(b.有浮窗 ? "有置顶浮窗挡着（就是那种看不见、但会把点击吃掉的）：" : "没有置顶浮窗挡路。");
+    (b.浮窗 || []).forEach((x) => lines.push("  " + x));
+    (b.窗口 || []).forEach((x) => lines.push("  " + x));
+    log(lines.join("\n"));
+  } catch (e) {
+    log("体检失败：" + (e && e.message ? e.message : e));
+  }
+  $("btnHealth").disabled = false;
+};
 
 // 停止自己：先让页面上说清楚，再请服务退。
 // 它退掉之后这个页面就废了（刷新会连不上），所以按钮点完就禁用，不留二次点击。
