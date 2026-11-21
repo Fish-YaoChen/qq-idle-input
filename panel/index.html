@@ -332,6 +332,8 @@ $("btnSend").onclick = async () => {
   const r = await getJSON("/api/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to, text }) });
   log(r.body?.out || r.body?.error || JSON.stringify(r.body));
   $("btnSend").disabled = false;
+  // 发完自动刷一次：会话列表的预览会变，不刷的话看着像没发出去。
+  if (r.status === 200) refresh();
 };
 
 $("btnOpenWeb").onclick = () => {
