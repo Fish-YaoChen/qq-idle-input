@@ -11,7 +11,7 @@
 #   powershell -File qq-read.ps1 -Open "小林" -Messages -Since   # 只吐上次之后的新消息
 #   powershell -File qq-read.ps1 -Open "小林" -Reset          # 把这个会话的游标清掉
 param(
-  [string]$Uin = "2727950855",
+  [string]$Uin = "",          # 哪个号；不填就自己挑（会报出挑的是谁）
   [string]$Open,
   [switch]$Sessions,
   [switch]$Messages,
@@ -71,10 +71,28 @@ public static class QQWin {
 '@
 
 # 找进程：命令行里带 --from-multiple-login <uin>
-$proc = Get-CimInstance Win32_Process -Filter "Name='QQ.exe'" |
-  Where-Object { $_.CommandLine -like "*--from-multiple-login $Uin *" } | Select-Object -First 1
-if (-not $proc) { Write-Error "没找到 QQ $Uin 的进程"; exit 2 }
+# 11-21：-Uin 不再写死某个号（那是本机的私事，不该进公开仓库）。
+# 但也不能「猜」——刚才按元素最多挑，挑到了另一个号，读出来全是别人的聊天。
+# 规矩：指定了就用指定的；只有一个实例就用它；有两个以上就拒绝，让调用方说清楚。
+$cands = @(Get-CimInstance Win32_Process -Filter "Name='QQ.exe'" |
+  Where-Object { $_.CommandLine -match 'from-multiple-login\s+\d+' })
+if ($Uin) {
+  $cands = @($cands | Where-Object { $_.CommandLine -like "*--from-multiple-login $Uin *" })
+  if (-not $cands.Count) { Write-Error "没找到 QQ $Uin 的进程"; exit 2 }
+} else {
+  $uins = @($cands | ForEach-Object { if ($_.CommandLine -match 'from-multiple-login\s+(\d+)') { $Matches[1] } })
+  if ($uins.Count -eq 0) { Write-Error "没找到登录中的 QQ 进程"; exit 2 }
+  if ($uins.Count -gt 1) {
+    Write-Error ("同时登着 $($uins -join '、') 这几个号，不知道该读哪个——用 -Uin 指定。（我不猜：猜错就是读别人的聊天。）")
+    exit 2
+  }
+}
+$proc = $cands[0]
 $pidQQ = [uint32]$proc.ProcessId
+if ($proc.CommandLine -match 'from-multiple-login\s+(\d+)') {
+  $pickedUin = $Matches[1]
+  if (-not $Json) { Write-Host "用的是 $pickedUin 这个号" }
+}
 if (-not ($proc.CommandLine -like "*force-renderer-accessibility*")) {
   # 11-21：Write-Warning 在 -Command 调用下会跑到 stdout，把 JSON 污染成「警告 + JSON」，
   # 面板那边 JSON.parse 直接失败（sessions 变成空数组）。-Json 时就不打这句。

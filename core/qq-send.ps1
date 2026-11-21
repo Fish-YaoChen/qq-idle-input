@@ -19,7 +19,7 @@ param(
   [switch]$Do,
   [int]$MinIdleMs = 1200,
   [switch]$IgnoreIdle,
-  [string]$Uin = "2727950855"
+  [string]$Uin = ""            # 哪个号；不填就自己挑，两个号同时登着会拒绝（不猜）
 )
 
 Add-Type -AssemblyName UIAutomationClient
@@ -144,9 +144,21 @@ if ($TextFile) { if (Test-Path $TextFile) { $Text = (Get-Content $TextFile -Raw 
 if (-not $Text) { Write-Error "没有要发的文本（-Text 或 -TextFile）"; exit 13 }
 
 # ---- 1. 找进程和窗口 ----
-$proc = Get-CimInstance Win32_Process -Filter "Name='QQ.exe'" |
-  Where-Object { $_.CommandLine -like "*--from-multiple-login $Uin *" } | Select-Object -First 1
-if (-not $proc) { Write-Error "没找到 QQ $Uin 的进程"; exit 2 }
+# 11-21：默认不再写死某个号，但也**不猜**——两个号同时登着就拒绝。
+$cands = @(Get-CimInstance Win32_Process -Filter "Name='QQ.exe'" |
+  Where-Object { $_.CommandLine -match 'from-multiple-login\s+\d+' })
+if ($Uin) {
+  $cands = @($cands | Where-Object { $_.CommandLine -like "*--from-multiple-login $Uin *" })
+  if (-not $cands.Count) { Write-Error "没找到 QQ $Uin 的进程"; exit 2 }
+} else {
+  $uins = @($cands | ForEach-Object { if ($_.CommandLine -match 'from-multiple-login\s+(\d+)') { $Matches[1] } })
+  if ($uins.Count -eq 0) { Write-Error "没找到登录中的 QQ 进程"; exit 2 }
+  if ($uins.Count -gt 1) {
+    Write-Error ("同时登着 $($uins -join '、') 这几个号，不知道发给谁——用 -Uin 指定。（不猜：猜错就发错号。）")
+    exit 2
+  }
+}
+$proc = $cands[0]
 $hwnd = [QQS]::FindByPid([uint32]$proc.ProcessId)
 if ($hwnd -eq [IntPtr]::Zero) { Write-Error "没找到窗口"; exit 3 }
 
