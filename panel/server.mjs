@@ -26,6 +26,7 @@ const DEFAULTS = {
   groupTrigger: "",
   archive: false,       // 11-21：原文落盘，默认关——没经过他点头不自己开
   archiveDir: "",       // 空 = ~/.dsh/qq-idle/messages
+  archiveEveryMin: 0,   // >0 才定时落盘（默认关：落一次会把你正在看的聊天切走）
   sessions: {}   // 昵称 -> "off" | "read" | "reply"
 };
 
@@ -74,6 +75,59 @@ function pickJson(text) {
     }
   }
   return undefined;
+}
+
+// ---- 原文落盘（C 方案）：只处理「可回」的会话 ----
+// 默认不自动跑：读消息要先 Invoke 点开会话，会把你正在看的聊天切走。
+// 想常驻就在配置里填 archiveEveryMin（分钟），下面那个心跳会按它来。
+let archiving = false;
+let lastAuto = 0;
+
+async function runArchive(cfg) {
+  const dir = cfg.archiveDir ? cfg.archiveDir : path.join(DATA_DIR, "messages");
+  const targets = Object.entries(cfg.sessions || {}).filter(([, v]) => v === "reply").map(([k]) => k);
+  if (!targets.length) {
+    return { ok: true, at: dir, written: 0, note: "没有设成「可回」的会话，没东西可落。" };
+  }
+  if (archiving) return { ok: false, error: "上一次还没跑完，等它一下。" };
+  archiving = true;
+  try {
+    const day = new Date();
+    const ymd = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    const out = [];
+    for (const name of targets) {
+      const args = ["-Open", name, "-Messages", "-Since", "-Json"];
+      if (cfg.uin) args.push("-Uin", String(cfg.uin));
+      const r = await ps("qq-read.ps1", args, 40000);
+      const list = pickJson(r.stdout);
+      const msgs = Array.isArray(list) ? list : [];
+      if (!msgs.length) { out.push({ 会话: name, 新增: 0 }); continue; }
+      const folder = path.join(dir, name.replace(/[\\/:*?"<>|]/g, "_"));
+      fs.mkdirSync(folder, { recursive: true });
+      const file = path.join(folder, `${ymd}.jsonl`);
+      const lines = msgs.map((m) => JSON.stringify({
+        at: new Date().toISOString(), 时间: m.时间 ?? "", 谁: m.谁 ?? "", 内容: m.内容 ?? ""
+      }));
+      fs.appendFileSync(file, lines.join("\n") + "\n", "utf8");
+      out.push({ 会话: name, 新增: msgs.length, 文件: file });
+    }
+    return { ok: true, at: dir, written: out.reduce((n, x) => n + (x.新增 || 0), 0), 明细: out };
+  } finally {
+    archiving = false;
+  }
+}
+
+// 一分钟醒一次，看「现在该不该落」。配置改了不用重启。
+function startArchiveHeartbeat() {
+  setInterval(async () => {
+    let c;
+    try { c = loadConfig(); } catch { return; }
+    const min = Number(c.archiveEveryMin || 0);
+    if (!c.archive || !(min > 0)) { lastAuto = 0; return; }
+    if (Date.now() - lastAuto < min * 60 * 1000) return;
+    lastAuto = Date.now();
+    try { await runArchive(c); } catch {}
+  }, 60 * 1000);
 }
 
 // DSH 的设置页在另一个源（端口不同），所以面板接口要允许跨源访问。
@@ -196,37 +250,15 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // 原文落盘：只处理「可回」的会话，一次读一点，写 jsonl。
-  // 11-21 搭的骨架，默认不自动跑——开会话会切换你正在看的聊天，这个动作得你点头才成常驻。
+  // 原文落盘：只处理「可回」的会话。逻辑在 runArchive 里，定时器也调它。
   if (p === "/api/archive/run" && req.method === "POST") {
-    const cfg = loadConfig();
-    const dir = cfg.archiveDir ? cfg.archiveDir : path.join(DATA_DIR, "messages");
-    const targets = Object.entries(cfg.sessions || {}).filter(([, v]) => v === "reply").map(([k]) => k);
-    if (!targets.length) return json(res, 200, { ok: true, at: dir, written: 0, note: "没有设成「可回」的会话，没东西可落。" });
-    const day = new Date();
-    const ymd = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
-    const out = [];
-    for (const name of targets) {
-      const args = ["-Open", name, "-Messages", "-Since", "-Json"];
-      if (cfg.uin) args.push("-Uin", String(cfg.uin));
-      const r = await ps("qq-read.ps1", args, 40000);
-      const list = pickJson(r.stdout);
-      const msgs = Array.isArray(list) ? list : [];
-      if (!msgs.length) { out.push({ 会话: name, 新增: 0 }); continue; }
-      const folder = path.join(dir, name.replace(/[\\/:*?"<>|]/g, "_"));
-      fs.mkdirSync(folder, { recursive: true });
-      const file = path.join(folder, `${ymd}.jsonl`);
-      const lines = msgs.map((m) => JSON.stringify({
-        at: new Date().toISOString(), 时间: m.时间 ?? "", 谁: m.谁 ?? "", 内容: m.内容 ?? ""
-      }));
-      fs.appendFileSync(file, lines.join("\n") + "\n", "utf8");
-      out.push({ 会话: name, 新增: msgs.length, 文件: file });
-    }
-    return json(res, 200, { ok: true, at: dir, written: out.reduce((n, x) => n + (x.新增 || 0), 0), 明细: out });
+    const out = await runArchive(loadConfig());
+    return json(res, 200, out);
   }
-
   json(res, 404, { error: "没有这个接口" });
 });
+
+startArchiveHeartbeat();
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`传达室：http://127.0.0.1:${PORT}`);

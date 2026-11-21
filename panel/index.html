@@ -125,6 +125,9 @@
       <label class="switch"><input type="checkbox" id="togArchive"><span class="knob"></span>存原文</label>
       <span class="label" style="width:64px">存到哪</span>
       <input type="text" id="archiveDir" placeholder="留空 = ~/.dsh/qq-idle/messages" style="flex:1;min-width:260px" />
+      <span class="label" style="width:78px">自动间隔</span>
+      <input type="number" id="archiveEvery" min="0" max="1440" step="1" style="width:96px" placeholder="0" />
+      <span class="hint">分钟，0 = 不自动</span>
       <button id="btnArchiveNow">现在落一次</button>
     </div>
     <div class="hint" style="margin-top:8px">只处理设成「可回」的会话，一行一条 jsonl：<code>{at, 时间, 谁, 内容}</code>。目录指到某个 world 的工作区，那个人格就能自己读——**这一步等于把聊天记录交给它**，想清楚再填。</div>
@@ -273,6 +276,7 @@ async function refresh() {
     $("uin").value = cfg.uin || "";
     $("togArchive").checked = !!cfg.archive;
     $("archiveDir").value = cfg.archiveDir || "";
+    $("archiveEvery").value = Number(cfg.archiveEveryMin || 0);
     $("btnArchiveNow").disabled = !cfg.archive;
   }
   const st = await getJSON("/api/status");
@@ -332,7 +336,8 @@ $("btnSaveCfg").onclick = async () => {
   const payload = {
     read: $("togRead").checked, write: $("togWrite").checked,
     groupTrigger: $("groupTrigger").value.trim(), uin: $("uin").value.trim(),
-    archive: $("togArchive").checked, archiveDir: $("archiveDir").value.trim()
+    archive: $("togArchive").checked, archiveDir: $("archiveDir").value.trim(),
+    archiveEveryMin: Math.max(0, Math.min(1440, Number($("archiveEvery").value || 0)))
   };
   const r = await getJSON("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   if (r.status === 200) {
