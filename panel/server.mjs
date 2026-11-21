@@ -27,6 +27,10 @@ const DEFAULTS = {
   archive: false,       // 11-21：原文落盘，默认关——没经过他点头不自己开
   archiveDir: "",       // 空 = ~/.dsh/qq-idle/messages
   archiveEveryMin: 0,   // >0 才定时落盘（默认关：落一次会把你正在看的聊天切走）
+  inbound: true,        // 订阅 OneBot 推送，在后台把连发合成一条
+  mergeWindowSec: 3,    // 安静这么久就算「这段说完了」
+  onebotWs: "",         // 空 = ws://127.0.0.1:3001
+  onebotToken: "",      // OneBot 的 access token（ws 用 ?access_token= 传）
   sessions: {}   // 昵称 -> "off" | "read" | "reply"
 };
 
@@ -128,6 +132,92 @@ function startArchiveHeartbeat() {
     lastAuto = Date.now();
     try { await runArchive(c); } catch {}
   }, 60 * 1000);
+}
+
+// ---- 进来的消息：在后台合并 ----
+// 他连发三条，不该变成三个回合。办法跟 world 一样：在**后台**攒着，
+// 安静 mergeWindowSec 秒之后合成一条，再交出去（这里先落成一条待读记录）。
+// 数据来自 OneBot 的 WebSocket（SnowLuma 的 3001），是推送，不点窗口、不碰键鼠。
+const inboxBuf = new Map();     // key -> { name, lines, timer }
+const inboxQueue = [];          // 已经合并好的，等外面来取
+let wsStatus = { on: false, url: "", last: "", events: 0, merged: 0 };
+
+function ymdOf(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function textOfMessage(ev) {
+  const m = ev.message;
+  if (Array.isArray(m)) {
+    return m.map((seg) => (seg && seg.type === "text" ? (seg.data?.text ?? "") : `[${seg?.type ?? "?"}]`)).join("");
+  }
+  if (typeof m === "string") return m;
+  return String(ev.raw_message ?? "");
+}
+
+function feedEvent(ev) {
+  if (!ev || ev.post_type !== "message") return false;
+  const key = ev.message_type === "group" ? `g${ev.group_id}` : `u${ev.user_id}`;
+  const name = ev.sender?.card || ev.sender?.nickname || String(ev.user_id ?? "?");
+  const text = textOfMessage(ev).trim();
+  if (!text) return false;
+  const cfg = loadConfig();
+  const win = Math.max(0, Number(cfg.mergeWindowSec ?? 3)) * 1000;
+  let b = inboxBuf.get(key);
+  if (!b) { b = { name, lines: [], timer: null }; inboxBuf.set(key, b); }
+  b.name = name;
+  b.lines.push({ 谁: name, 内容: text, at: new Date().toISOString() });
+  if (b.timer) clearTimeout(b.timer);
+  // 每来一条就把计时往后推：直到安静够久才算「这一段说完了」
+  b.timer = setTimeout(() => flushInbox(key), win);
+  wsStatus.events++;
+  return true;
+}
+
+function flushInbox(key) {
+  const b = inboxBuf.get(key);
+  if (!b || !b.lines.length) return;
+  inboxBuf.delete(key);
+  const cfg = loadConfig();
+  const dir = cfg.archiveDir ? cfg.archiveDir : path.join(DATA_DIR, "messages");
+  const folder = path.join(dir, "inbox");
+  const rec = {
+    at: new Date().toISOString(),
+    会话: b.name,
+    条数: b.lines.length,
+    内容: b.lines.map((x) => x.内容).join("\n"),   // 合成一条：整段话
+    分段: b.lines
+  };
+  try {
+    fs.mkdirSync(folder, { recursive: true });
+    fs.appendFileSync(path.join(folder, `${ymdOf()}.jsonl`), JSON.stringify(rec) + "\n", "utf8");
+  } catch (e) { wsStatus.last = "落盘失败：" + String(e?.message ?? e); }
+  inboxQueue.push(rec);
+  if (inboxQueue.length > 200) inboxQueue.shift();
+  wsStatus.merged++;
+}
+
+function startInbound() {
+  const cfg = loadConfig();
+  if (cfg.inbound === false) return;
+  const url = cfg.onebotWs || "ws://127.0.0.1:3001";
+  const token = String(cfg.onebotToken || "");
+  const full = token ? `${url}${url.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}` : url;
+  if (typeof WebSocket !== "function") { wsStatus.last = "这个 node 没有 WebSocket，起不来"; return; }
+  wsStatus.url = url;
+  let ws;
+  try { ws = new WebSocket(full); } catch (e) { wsStatus.last = "连不上：" + String(e?.message ?? e); return; }
+  ws.addEventListener("open", () => { wsStatus.on = true; wsStatus.last = "连上了"; });
+  ws.addEventListener("message", (m) => {
+    let ev;
+    try { ev = JSON.parse(typeof m.data === "string" ? m.data : String(m.data)); } catch { return; }
+    feedEvent(ev);
+  });
+  ws.addEventListener("close", () => {
+    wsStatus.on = false; wsStatus.last = "断了，5 秒后重连";
+    setTimeout(startInbound, 5000);
+  });
+  ws.addEventListener("error", () => { wsStatus.last = "连接出错"; });
 }
 
 // DSH 的设置页在另一个源（端口不同），所以面板接口要允许跨源访问。
@@ -255,10 +345,28 @@ const server = http.createServer(async (req, res) => {
     const out = await runArchive(loadConfig());
     return json(res, 200, out);
   }
+  // 取合并好的消息（给外面接 DSH 用）：?since=N 只给第 N 条之后的
+  if (p === "/api/inbox") {
+    const since = Math.max(0, Number(url.searchParams.get("since") || 0));
+    return json(res, 200, { ok: true, ws: wsStatus, total: inboxQueue.length, since, items: inboxQueue.slice(since) });
+  }
+
+  // 灌一条假事件，专门用来验合并（只允许本机调用）
+  if (p === "/api/inbox/feed" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    let ev = {};
+    try { ev = JSON.parse(body || "{}"); } catch { return json(res, 400, { error: "不是合法 JSON" }); }
+    if (!ev.post_type) ev.post_type = "message";
+    const ok = feedEvent(ev);
+    return json(res, 200, { ok, ws: wsStatus, pending: Array.from(inboxBuf.values()).map((b) => ({ 会话: b.name, 条数: b.lines.length })) });
+  }
+
   json(res, 404, { error: "没有这个接口" });
 });
 
 startArchiveHeartbeat();
+startInbound();
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`传达室：http://127.0.0.1:${PORT}`);

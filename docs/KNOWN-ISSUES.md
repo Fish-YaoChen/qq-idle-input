@@ -219,3 +219,11 @@ Get-ChildItem *.ps1 | ForEach-Object {
 **顺带一个形状问题**：`$list | ConvertTo-Json` 在只有一条时会把数组**退化成对象**（`{...}` 而不是 `[{...}]`），调用方按数组解析就拿到空。改成 `ConvertTo-Json -InputObject @($list)`，5.1 和 7 都稳定输出数组。
 
 **教训**：一个脚本同时服务「人看」和「机器吃」，输出的**形状**就得当成接口来对待——两段 JSON、单条退化成对象，命令行里看着都挺正常。
+
+## 二十一、Node 自带的 WebSocket 不能加自定义头
+
+**现象**：想拿 `Authorization: Bearer <token>` 连 SnowLuma 的 3001，`new WebSocket(url, {...})` 传头没有效果。
+
+**原因**：Node 22 内置的 `WebSocket`（undici）是浏览器形状的，构造参数只有协议名，没有 headers。
+
+**处理**：OneBot 标准本来就允许把 token 放查询串——`ws://127.0.0.1:3001/?access_token=<token>`。用它，不用折腾头。

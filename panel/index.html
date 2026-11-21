@@ -130,6 +130,12 @@
       <span class="hint">分钟；0 = 不自己抓，等你点「现在落一次」</span>
       <button id="btnArchiveNow">现在落一次</button>
     </div>
+    <div class="row" style="margin-top:10px">
+      <span class="label" style="width:78px">进来合并</span>
+      <input type="number" id="mergeWin" min="0" max="60" step="1" style="width:96px" placeholder="3" />
+      <span class="hint">秒：对方连发几条，安静这么久合成一条（0 = 不合并）</span>
+      <span class="hint" id="wsState">WS ?</span>
+    </div>
     <div class="hint" style="margin-top:8px">只处理设成「可回」的会话，一行一条 jsonl：<code>{at, 时间, 谁, 内容}</code>。「多久抓一次」是<strong>采集频率</strong>——每次抓都要点开会话，你正在看的聊天会被切走，所以默认 0（不自己抓）。目录指到某个 world 的工作区，那个人格就能自己读——这一步等于把聊天记录交给它，想清楚再填。</div>
   </section>
 
@@ -277,12 +283,19 @@ async function refresh() {
     $("togArchive").checked = !!cfg.archive;
     $("archiveDir").value = cfg.archiveDir || "";
     $("archiveEvery").value = Number(cfg.archiveEveryMin || 0);
+    $("mergeWin").value = Number(cfg.mergeWindowSec ?? 3);
     $("btnArchiveNow").disabled = !cfg.archive;
   }
   const st = await getJSON("/api/status");
   setChips(st.body?.selfcheck);
   const ss = await getJSON("/api/sessions");
   renderSessions(ss.body?.sessions || []);
+  // 进来的消息：顺带看一下 WS 连没连上
+  try {
+    const ib = await getJSON("/api/inbox");
+    const ws = ib.body?.ws || {};
+    $("wsState").textContent = ws.on ? "WS 已连上，合并好的 " + (ws.merged || 0) + " 条" : "WS " + (ws.last || "没连");
+  } catch { $("wsState").textContent = "WS 状态读不到"; }
   $("sessHint").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
   log(ss.body?.ok
     ? `读到 ${ss.body.sessions.length} 个会话。`
@@ -337,7 +350,8 @@ $("btnSaveCfg").onclick = async () => {
     read: $("togRead").checked, write: $("togWrite").checked,
     groupTrigger: $("groupTrigger").value.trim(), uin: $("uin").value.trim(),
     archive: $("togArchive").checked, archiveDir: $("archiveDir").value.trim(),
-    archiveEveryMin: Math.max(0, Math.min(1440, Number($("archiveEvery").value || 0)))
+    archiveEveryMin: Math.max(0, Math.min(1440, Number($("archiveEvery").value || 0))),
+    mergeWindowSec: Math.max(0, Math.min(60, Number($("mergeWin").value || 0)))
   };
   const r = await getJSON("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   if (r.status === 200) {
