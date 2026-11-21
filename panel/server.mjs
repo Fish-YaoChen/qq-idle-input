@@ -24,6 +24,8 @@ const DEFAULTS = {
   write: false,
   requireConfirm: true,
   groupTrigger: "",
+  archive: false,       // 11-21：原文落盘，默认关——没经过他点头不自己开
+  archiveDir: "",       // 空 = ~/.dsh/qq-idle/messages
   sessions: {}   // 昵称 -> "off" | "read" | "reply"
 };
 
@@ -56,7 +58,7 @@ function ps(script, args = [], timeoutMs = 20000) {
 }
 
 // 从一坨输出里把 JSON 挖出来。
-// 11-21：PowerShell 的 Write-Warning 在 -Command 调用下是往 **stdout** 写的，
+// 11-21：PowerShell 的 Write-Warning 在 -Command 调用下是往 stdout 写的，
 // 于是 stdout 变成「警告: …\n[\n {…}\n]」，JSON.parse 直接失败、会话列表变空。
 // 脚本那边已经改成 -Json 时不打警告，这里再兜一层：从第一个 [ / { 截到最后一个 ] / }。
 function pickJson(text) {
@@ -192,6 +194,35 @@ const server = http.createServer(async (req, res) => {
       窗口: t1.split("\n").filter(Boolean).slice(-3),
       浮窗: t2.split("\n").filter(Boolean).slice(-6)
     });
+  }
+
+  // 原文落盘：只处理「可回」的会话，一次读一点，写 jsonl。
+  // 11-21 搭的骨架，默认不自动跑——开会话会切换你正在看的聊天，这个动作得你点头才成常驻。
+  if (p === "/api/archive/run" && req.method === "POST") {
+    const cfg = loadConfig();
+    const dir = cfg.archiveDir ? cfg.archiveDir : path.join(DATA_DIR, "messages");
+    const targets = Object.entries(cfg.sessions || {}).filter(([, v]) => v === "reply").map(([k]) => k);
+    if (!targets.length) return json(res, 200, { ok: true, at: dir, written: 0, note: "没有设成「可回」的会话，没东西可落。" });
+    const day = new Date();
+    const ymd = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    const out = [];
+    for (const name of targets) {
+      const args = ["-Open", name, "-Messages", "-Since", "-Json"];
+      if (cfg.uin) args.push("-Uin", String(cfg.uin));
+      const r = await ps("qq-read.ps1", args, 40000);
+      const list = pickJson(r.stdout);
+      const msgs = Array.isArray(list) ? list : [];
+      if (!msgs.length) { out.push({ 会话: name, 新增: 0 }); continue; }
+      const folder = path.join(dir, name.replace(/[\\/:*?"<>|]/g, "_"));
+      fs.mkdirSync(folder, { recursive: true });
+      const file = path.join(folder, `${ymd}.jsonl`);
+      const lines = msgs.map((m) => JSON.stringify({
+        at: new Date().toISOString(), 时间: m.时间 ?? "", 谁: m.谁 ?? "", 内容: m.内容 ?? ""
+      }));
+      fs.appendFileSync(file, lines.join("\n") + "\n", "utf8");
+      out.push({ 会话: name, 新增: msgs.length, 文件: file });
+    }
+    return json(res, 200, { ok: true, at: dir, written: out.reduce((n, x) => n + (x.新增 || 0), 0), 明细: out });
   }
 
   json(res, 404, { error: "没有这个接口" });

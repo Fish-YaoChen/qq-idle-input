@@ -284,7 +284,10 @@ function Write-JsonMap([string]$p, [hashtable]$h) {
   ($h | ConvertTo-Json -Depth 6) | Set-Content -Path $p -Encoding UTF8
 }
 
-if (-not $Messages -or $Open) {
+# 11-21：原来写的是 `-not $Messages -or $Open`，于是「-Open X -Messages -Json」会先吐一段会话列表、
+# 再吐一段消息——两段 JSON 拼在 stdout 里，调用方（面板）拿到的是第一段，把会话行当成消息落了盘。
+# 只读消息的时候就别再吐会话列表。
+if (-not ($Open -and $Messages)) {
   $s = @(Get-Sessions)
   # 「谁在找我」：拿每个会话的 时间+预览 跟上次比。变了就是有新动静。
   # 第一次跑没有上次，全部算新（并说一句这是基线），第二次开始只标真变的。
@@ -303,7 +306,7 @@ if (-not $Messages -or $Open) {
   Write-JsonMap $sp $state
 
   if ($Json) {
-    $s | ConvertTo-Json -Depth 4
+    ConvertTo-Json -InputObject @($s) -Depth 4
   } else {
     "=== 会话 $($s.Count) 个$(if ($firstRun) { '（第一次记基线，下次开始只标新的）' } else { '' }) ==="
     $s | ForEach-Object {
@@ -341,7 +344,7 @@ if ($Open) {
         }
       }
       if ($Since) {
-        if ($Json) { $new | ConvertTo-Json -Depth 4 } else {
+        if ($Json) { ConvertTo-Json -InputObject @($new) -Depth 4 } else {
           if ($why) { "! $why" }
           if ($new.Count -eq 0) { "=== 「$Open」没有新消息 ===" }
           else {
@@ -350,7 +353,7 @@ if ($Open) {
           }
         }
       } else {
-        if ($Json) { $m | ConvertTo-Json -Depth 4 } else {
+        if ($Json) { ConvertTo-Json -InputObject @($m) -Depth 4 } else {
           "=== 「$Open」最近 $($m.Count) 条 ==="
           $m | ForEach-Object { "  [$($_.时间)] $($_.谁)：$(($_.内容 -replace "`n"," ").Substring(0,[Math]::Min(60,($_.内容 -replace "`n"," ").Length)))" }
         }
