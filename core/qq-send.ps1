@@ -206,12 +206,19 @@ function Open-Session([string]$name) {
 
 # 打开可能要试两次：11-20 观察到 QQ 从托盘回来后第一次 Invoke 有时只选中、不打开会话。
 $openedName = ""
+# 11-21：这个版本的 QQ，点**已经选中**的那一行会把聊天区关掉——再点一次反而没标题、
+# 输入框也拿不到焦点（今天发送就失败在这儿）。所以先看顶部：已经是这个人，一次都不点。
+if ((Get-OpenChatName) -eq $To) {
+  Log "要发的会话本来就开着，不点它。"
+  $openedName = $To
+} else {
 for ($try = 1; $try -le 3; $try++) {
   if (-not (Open-Session $To)) { Write-Error "会话列表里没有「$To」这一行，**什么都没打**"; exit 5 }
   Start-Sleep -Milliseconds (300 + 250 * $try)
   $openedName = Get-OpenChatName
   if ($openedName -eq $To) { break }
   Log "第 $try 次打开后顶部是「$openedName」，再试"
+}
 }
 
 Log "打开的是：「$openedName」"

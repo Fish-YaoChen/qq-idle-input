@@ -27,8 +27,11 @@ const DEFAULTS = {
   archive: false,       // 11-21：原文落盘，默认关——没经过他点头不自己开
   archiveDir: "",       // 空 = ~/.dsh/qq-idle/messages
   archiveEveryMin: 0,   // >0 才定时落盘（默认关：落一次会把你正在看的聊天切走）
-  inbound: true,        // 订阅 OneBot 推送，在后台把连发合成一条
-  mergeWindowSec: 3,    // 安静这么久就算「这段说完了」
+  // 收消息的两条路。默认 uia：自己的读法，不依赖任何桥——
+  // 这个项目存在的意义就是「桥死了还能用」，命脉不能接在桥上。
+  inboundMode: "uia",   // "uia"（默认，轮询 qq-read）| "onebot"（可选加速，要桥在）
+  pollSec: 45,          // uia 模式多久看一次（会点开会话，别太勤）
+  mergeWindowSec: 3,    // onebot 模式：安静这么久算「这段说完了」
   onebotWs: "",         // 空 = ws://127.0.0.1:3001
   onebotToken: "",      // OneBot 的 access token（ws 用 ?access_token= 传）
   sessions: {}   // 昵称 -> "off" | "read" | "reply"
@@ -178,16 +181,73 @@ function flushInbox(key) {
   const b = inboxBuf.get(key);
   if (!b || !b.lines.length) return;
   inboxBuf.delete(key);
-  const cfg = loadConfig();
-  const dir = cfg.archiveDir ? cfg.archiveDir : path.join(DATA_DIR, "messages");
-  const folder = path.join(dir, "inbox");
-  const rec = {
-    at: new Date().toISOString(),
+  pushMerged({
     会话: b.name,
     条数: b.lines.length,
     内容: b.lines.map((x) => x.内容).join("\n"),   // 合成一条：整段话
     分段: b.lines
-  };
+  });
+}
+
+// ---- 收消息：默认走自己的读法（不依赖桥）----
+// 桥（SnowLuma / OpenQQ）只是「有它更省事」：推送、不用点窗口。
+// 但没有桥的时候，这一层也得能活——那正是这个项目存在的理由。
+function startInbound() {
+  const cfg = loadConfig();
+  const mode = String(cfg.inboundMode || "uia");
+  if (mode === "onebot") return startOnebot(cfg);
+  return startUiaPolling(cfg);
+}
+
+// uia：定时看会话列表，有新动静就点开读一次，把这次读到的**全部新消息**当成一段合成一条。
+let uiaBusy = false;
+function startUiaPolling(cfg) {
+  const sec = Math.max(10, Number(cfg.pollSec || 45));
+  wsStatus.url = "uia 轮询";
+  wsStatus.on = true;
+  wsStatus.last = `每 ${sec} 秒看一次会话列表`;
+  let last = 0;
+  setInterval(async () => {
+    if (Date.now() - last < sec * 1000) return;
+    if (uiaBusy) return;
+    const c = loadConfig();
+    if (String(c.inboundMode || "uia") === "onebot") return;
+    last = Date.now();
+    uiaBusy = true;
+    try { await pollUiaOnce(c); } catch (e) { wsStatus.last = "轮询出错：" + String(e?.message ?? e); }
+    finally { uiaBusy = false; }
+  }, 5000);
+}
+
+async function pollUiaOnce(cfg) {
+  const args = ["-Sessions", "-Json"];
+  if (cfg.uin) args.push("-Uin", String(cfg.uin));
+  const r = await ps("qq-read.ps1", args, 40000);
+  const list = pickJson(r.stdout);
+  if (!Array.isArray(list)) return;
+  // 只看设了状态的会话（关的不理），且这次有新动静
+  const hot = list.filter((s) => (cfg.sessions || {})[s.会话] && (cfg.sessions || {})[s.会话] !== "off" && s.新);
+  for (const s of hot) {
+    const a2 = ["-Open", s.会话, "-Messages", "-Since", "-Json"];
+    if (cfg.uin) a2.push("-Uin", String(cfg.uin));
+    const rr = await ps("qq-read.ps1", a2, 40000);
+    const msgs = pickJson(rr.stdout);
+    if (!Array.isArray(msgs) || !msgs.length) continue;
+    // 这一段全都算一条：他来三条、五条，都并成一条给我
+    pushMerged({
+      会话: s.会话,
+      条数: msgs.length,
+      内容: msgs.map((m) => m.内容 ?? "").join("\n"),
+      分段: msgs.map((m) => ({ 谁: m.谁 ?? "", 内容: m.内容 ?? "", 时间: m.时间 ?? "" }))
+    });
+  }
+}
+
+function pushMerged(part) {
+  const cfg = loadConfig();
+  const dir = cfg.archiveDir ? cfg.archiveDir : path.join(DATA_DIR, "messages");
+  const folder = path.join(dir, "inbox");
+  const rec = { at: new Date().toISOString(), ...part };
   try {
     fs.mkdirSync(folder, { recursive: true });
     fs.appendFileSync(path.join(folder, `${ymdOf()}.jsonl`), JSON.stringify(rec) + "\n", "utf8");
@@ -197,9 +257,8 @@ function flushInbox(key) {
   wsStatus.merged++;
 }
 
-function startInbound() {
-  const cfg = loadConfig();
-  if (cfg.inbound === false) return;
+// onebot：可选加速。要靠桥（SnowLuma / OpenQQ），桥没了这条路就没了。
+function startOnebot(cfg) {
   const url = cfg.onebotWs || "ws://127.0.0.1:3001";
   const token = String(cfg.onebotToken || "");
   const full = token ? `${url}${url.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}` : url;
@@ -207,7 +266,7 @@ function startInbound() {
   wsStatus.url = url;
   let ws;
   try { ws = new WebSocket(full); } catch (e) { wsStatus.last = "连不上：" + String(e?.message ?? e); return; }
-  ws.addEventListener("open", () => { wsStatus.on = true; wsStatus.last = "连上了"; });
+  ws.addEventListener("open", () => { wsStatus.on = true; wsStatus.last = "连上了（onebot 模式）"; });
   ws.addEventListener("message", (m) => {
     let ev;
     try { ev = JSON.parse(typeof m.data === "string" ? m.data : String(m.data)); } catch { return; }
@@ -215,7 +274,7 @@ function startInbound() {
   });
   ws.addEventListener("close", () => {
     wsStatus.on = false; wsStatus.last = "断了，5 秒后重连";
-    setTimeout(startInbound, 5000);
+    setTimeout(() => { if (String(loadConfig().inboundMode || "uia") === "onebot") startInbound(); }, 5000);
   });
   ws.addEventListener("error", () => { wsStatus.last = "连接出错"; });
 }
