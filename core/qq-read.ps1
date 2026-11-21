@@ -224,14 +224,6 @@ function Get-Messages([int]$max) {
   return $msgs
 }
 
-if (-not $Messages -or $Open) {
-  $s = Get-Sessions
-  if ($Json) { $s | ConvertTo-Json -Depth 4 } else {
-    "=== 会话 $($s.Count) 个 ==="
-    $s | ForEach-Object { "  {0,-10} {1,-10} {2}" -f $_.会话, $_.时间, ($_.预览 -replace "`n", " ") }
-  }
-}
-
 # ---------- 游标：只吐比上次新的 ----------
 # 消息的身份用「谁 + 内容」的指纹，不用时间：QQ 的时间戳会变成「昨天 18:21」，
 # 过了零点意思就变了，拿它当键，第二天一定对不上。
@@ -259,11 +251,72 @@ function Write-Cursor([hashtable]$c) {
 }
 
 function Get-Fp($m) {
-  $raw = "$($m.谁)|$($m.内容)"
+  return (Get-Hash16 "$($m.谁)|$($m.内容)")
+}
+
+function Get-Hash16([string]$s) {
   $sha = [System.Security.Cryptography.SHA256]::Create()
-  $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($raw))
+  $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($s))
   return ([System.BitConverter]::ToString($bytes) -replace '-', '').Substring(0, 16).ToLower()
 }
+
+# 会话列表的「上次长什么样」：按会话名记 时间+预览 的指纹。
+# 跟消息游标分开存（sessions.json / cursor.json）——一个是「谁在找我」，一个是「我读到哪了」。
+function Get-SessionsStatePath {
+  if ($CursorFile) { return (Join-Path (Split-Path $CursorFile -Parent) "sessions.json") }
+  return (Join-Path $env:USERPROFILE ".dsh\qq-idle\sessions.json")
+}
+
+function Read-JsonMap([string]$p) {
+  $h = @{}
+  if (-not (Test-Path $p)) { return $h }
+  try {
+    $o = Get-Content $p -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($k in $o.PSObject.Properties.Name) { $h[$k] = $o.$k }
+  } catch {}
+  return $h
+}
+
+function Write-JsonMap([string]$p, [hashtable]$h) {
+  New-Item -ItemType Directory -Force -Path (Split-Path $p -Parent) | Out-Null
+  ($h | ConvertTo-Json -Depth 6) | Set-Content -Path $p -Encoding UTF8
+}
+
+if (-not $Messages -or $Open) {
+  $s = @(Get-Sessions)
+  # 「谁在找我」：拿每个会话的 时间+预览 跟上次比。变了就是有新动静。
+  # 第一次跑没有上次，全部算新（并说一句这是基线），第二次开始只标真变的。
+  $sp = Get-SessionsStatePath
+  $prevS = Read-JsonMap $sp
+  $firstRun = ($prevS.Count -eq 0)
+  $state = @{}
+  foreach ($x in $s) {
+    $fp = Get-Hash16 ("{0}|{1}" -f $x.时间, $x.预览)
+    $isNew = -not ($prevS.ContainsKey($x.会话) -and $prevS[$x.会话].fp -eq $fp)
+    $x | Add-Member -NotePropertyName 新 -NotePropertyValue $isNew -Force
+    $state[$x.会话] = [pscustomobject]@{
+      fp = $fp; 时间 = $x.时间; 预览 = ($x.预览 -replace "`n", " "); at = (Get-Date).ToString("s")
+    }
+  }
+  Write-JsonMap $sp $state
+
+  if ($Json) {
+    $s | ConvertTo-Json -Depth 4
+  } else {
+    "=== 会话 $($s.Count) 个$(if ($firstRun) { '（第一次记基线，下次开始只标新的）' } else { '' }) ==="
+    $s | ForEach-Object {
+      $mark = if ($_.新) { '●' } else { ' ' }
+      "  {0} {1,-10} {2,-10} {3}" -f $mark, $_.会话, $_.时间, ($_.预览 -replace "`n", " ")
+    }
+    if (-not $firstRun) {
+      $hot = @($s | Where-Object { $_.新 } | ForEach-Object { $_.会话 })
+      if ($hot.Count) { "  —— 有新动静：$($hot -join '、')" }
+      else { "  —— 跟上次一样，没有新动静。" }
+    }
+  }
+}
+
+
 
 if ($Open) {
   if (Open-Session $Open) {

@@ -53,8 +53,9 @@ pnpm add dsh-qq-idle
 # 1. 先自检：能不能用、缺什么，一条一条告诉你
 powershell -File core\selfcheck.ps1
 
-# 2. 看会话（只读，不碰窗口）
+# 2. 看会话（只读，不碰窗口）；有新动静的会话前面标 ●
 powershell -File core\qq-read.ps1 -Sessions
+powershell -File core\qq-read.ps1 -Sessions -Json      # 每条带 "新": true/false
 
 # 3. 读某个会话最近的消息（会 Invoke 打开会话；窗口不可见时先显示，不抢焦点）
 powershell -File core\qq-read.ps1 -Open "某人" -Messages -MaxMessages 10
