@@ -8,12 +8,18 @@
 #   powershell -File qq-read.ps1 -Sessions                 # 只列会话
 #   powershell -File qq-read.ps1 -Open "妈妈" -Messages    # 点开会话读消息（Invoke，不碰鼠标）
 #   powershell -File qq-read.ps1 -Uin 2727950855 -Json     # 输出 JSON
+#   powershell -File qq-read.ps1 -Open "小林" -Messages -Since   # 只吐上次之后的新消息
+#   powershell -File qq-read.ps1 -Open "小林" -Reset          # 把这个会话的游标清掉
 param(
   [string]$Uin = "2727950855",
   [string]$Open,
   [switch]$Sessions,
   [switch]$Messages,
   [switch]$Json,
+  [switch]$Since,          # 只吐比游标新的（游标在 ~/.dsh/qq-idle/cursor.json）
+  [switch]$Reset,          # 清掉这个会话的游标
+  [string]$CursorFile,     # 换一个游标文件（默认 ~/.dsh/qq-idle/cursor.json）
+  [switch]$ShowFp,         # 连每条消息的指纹一起打出来（调游标用）
   [int]$MaxMessages = 30
 )
 
@@ -126,23 +132,53 @@ public static class __RDV { [DllImport("user32.dll")] public static extern bool 
 
 function Open-Session([string]$name) {
   if (-not (Ensure-Visible)) { Write-Error "窗口显示不出来，不做任何操作（对隐藏窗口 Invoke 会把 QQ 卡死）"; return $false }
-  $cond = New-Object System.Windows.Automation.PropertyCondition(
-    [System.Windows.Automation.AutomationElement]::NameProperty, $name)
-  $t = $win.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
-  if (-not $t) { Write-Error "会话列表里没找到「$name」"; return $false }
+  # 11-21：不能「按名字找元素」——那个名字第一个匹配到的往往是顶部自己的昵称或者气泡里的头像名，
+  # 点下去等于没点（昨天发错会话就是这么来的）。只认「会话行」：recent-contact-item，
+  # 行里的第一个文本等于目标名字才算命中；点完再核对聊天窗口顶部的名字。
+  $all = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  $textCond = New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::Text)
   $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
-  $cur = $t
-  for ($i = 0; $i -lt 5; $i++) {
-    $cur = $walker.GetParent($cur); if (-not $cur) { break }
-    $pats = $cur.GetSupportedPatterns()
-    if ($pats | Where-Object { $_ -eq [System.Windows.Automation.InvokePattern]::Pattern }) {
-      $cur.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-      Start-Sleep -Milliseconds 600
-      return $true
-    }
+  $row = $null
+  foreach ($e in $all) {
+    if ($e.Current.ClassName -notlike "recent-contact-item*") { continue }
+    $t = $e.FindAll([System.Windows.Automation.TreeScope]::Descendants, $textCond)
+    if ($t.Count -eq 0) { continue }
+    if ($t[0].Current.Name -eq $name) { $row = $e; break }
   }
-  Write-Error "「$name」这一行不支持 Invoke"
-  return $false
+  if (-not $row) { Write-Error "会话列表里没有「$name」（只认会话行，不认名字碰巧相同的元素）"; return $false }
+
+  # 11-21：这个版本的 QQ，点已经选中的那一行会把聊天区**关掉**——再点一次反而没标题了。
+  # 所以先看顶部：已经是这个人，就直接读，一次都不点。
+  $hdrNow = $null
+  $snap = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  $hdrNow = $snap | Where-Object { $_.Current.ClassName -eq "chat-header__contact-name" } | Select-Object -First 1
+  if ($hdrNow -and $hdrNow.Current.Name -eq $name) { return $true }
+
+  $clickable = $null
+  $cur = $row
+  for ($i = 0; $i -lt 5 -and $cur; $i++) {
+    if ($cur.GetSupportedPatterns() | Where-Object { $_ -eq [System.Windows.Automation.InvokePattern]::Pattern }) { $clickable = $cur; break }
+    $cur = $walker.GetParent($cur)
+  }
+  if (-not $clickable) { Write-Error "「$name」这一行不支持 Invoke"; return $false }
+  $clickable.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+  Start-Sleep -Milliseconds 600
+
+  # 核对：顶部名字对不对。不对就一个字都不往下做。
+  # 11-21：聊天区是懒渲染的，点完 600ms 未必已经有标题——轮询 3 秒，别一缺就判「没进对」。
+  $hdr = $null
+  for ($k = 0; $k -lt 8; $k++) {
+    $now = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    $hdr = $now | Where-Object { $_.Current.ClassName -eq "chat-header__contact-name" } | Select-Object -First 1
+    if ($hdr) { break }
+    Start-Sleep -Milliseconds 400
+  }
+  if (-not $hdr) { Write-Error "点了「$name」，但三秒内聊天窗口顶部都没出现名字——不确定进没进对会话，停手"; return $false }
+  $who = $hdr.Current.Name
+  if ($who -ne $name) { Write-Error "顶部是「$who」，不是「$name」——不往下做了"; return $false }
+  return $true
 }
 
 function Get-Messages([int]$max) {
@@ -196,13 +232,84 @@ if (-not $Messages -or $Open) {
   }
 }
 
+# ---------- 游标：只吐比上次新的 ----------
+# 消息的身份用「谁 + 内容」的指纹，不用时间：QQ 的时间戳会变成「昨天 18:21」，
+# 过了零点意思就变了，拿它当键，第二天一定对不上。
+# 指纹撞上（连着两条一模一样的话）就取最后一条之后——宁可漏一条重复的，也别把旧消息重放一遍。
+function Get-CursorPath {
+  if ($CursorFile) { return $CursorFile }
+  return (Join-Path $env:USERPROFILE ".dsh\qq-idle\cursor.json")
+}
+
+function Read-Cursor {
+  $p = Get-CursorPath
+  if (-not (Test-Path $p)) { return @{} }
+  try {
+    $o = Get-Content $p -Raw -Encoding UTF8 | ConvertFrom-Json
+    $h = @{}
+    foreach ($k in $o.PSObject.Properties.Name) { $h[$k] = $o.$k }
+    return $h
+  } catch { return @{} }
+}
+
+function Write-Cursor([hashtable]$c) {
+  $p = Get-CursorPath
+  New-Item -ItemType Directory -Force -Path (Split-Path $p -Parent) | Out-Null
+  ($c | ConvertTo-Json -Depth 5) | Set-Content -Path $p -Encoding UTF8
+}
+
+function Get-Fp($m) {
+  $raw = "$($m.谁)|$($m.内容)"
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($raw))
+  return ([System.BitConverter]::ToString($bytes) -replace '-', '').Substring(0, 16).ToLower()
+}
+
 if ($Open) {
   if (Open-Session $Open) {
     if ($Messages -or $Json) {
-      $m = Get-Messages $MaxMessages
-      if ($Json) { $m | ConvertTo-Json -Depth 4 } else {
-        "=== 「$Open」最近 $($m.Count) 条 ==="
-        $m | ForEach-Object { "  [$($_.时间)] $($_.谁)：$(($_.内容 -replace "`n"," ").Substring(0,[Math]::Min(60,($_.内容 -replace "`n"," ").Length)))" }
+      $m = @(Get-Messages $MaxMessages)
+      $cur = Read-Cursor
+      if ($Reset) { $cur.Remove($Open) | Out-Null }
+      $prev = $cur[$Open]
+      $new = $m
+      $why = ""
+      if ($prev -and $prev.fp -and $m.Count -gt 0) {
+        $idx = -1
+        for ($i = $m.Count - 1; $i -ge 0; $i--) {
+          if ((Get-Fp $m[$i]) -eq $prev.fp) { $idx = $i; break }
+        }
+        if ($idx -ge 0) {
+          $new = if ($idx -lt $m.Count - 1) { @($m[($idx + 1)..($m.Count - 1)]) } else { @() }
+        } else {
+          $why = "游标对不上（上次看到的那条已经不在窗口里了），这次把窗口里的都给你"
+        }
+      }
+      if ($Since) {
+        if ($Json) { $new | ConvertTo-Json -Depth 4 } else {
+          if ($why) { "! $why" }
+          if ($new.Count -eq 0) { "=== 「$Open」没有新消息 ===" }
+          else {
+            "=== 「$Open」新 $($new.Count) 条 ==="
+            $new | ForEach-Object { "  [$($_.时间)] $($_.谁)：$(($_.内容 -replace "`n"," ").Substring(0,[Math]::Min(60,($_.内容 -replace "`n"," ").Length)))" }
+          }
+        }
+      } else {
+        if ($Json) { $m | ConvertTo-Json -Depth 4 } else {
+          "=== 「$Open」最近 $($m.Count) 条 ==="
+          $m | ForEach-Object { "  [$($_.时间)] $($_.谁)：$(($_.内容 -replace "`n"," ").Substring(0,[Math]::Min(60,($_.内容 -replace "`n"," ").Length)))" }
+        }
+      }
+      if ($ShowFp) {
+        "---- 指纹（从旧到新，最后一条是游标会记的）----"
+        $m | ForEach-Object { "  {0}  [{1}] {2}" -f (Get-Fp $_), $_.时间, $_.谁 }
+        if ($prev) { "  游标现在指着：" + $prev.fp + "（" + $prev.时间 + "）" }
+      }
+      # 记到窗口里最后一条：下次从这里往下数
+      if ($m.Count -gt 0) {
+        $last = $m[$m.Count - 1]
+        $cur[$Open] = [pscustomobject]@{ fp = (Get-Fp $last); 时间 = $last.时间; at = (Get-Date).ToString("s") }
+        Write-Cursor $cur
       }
     }
   }

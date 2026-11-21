@@ -59,6 +59,11 @@ powershell -File core\qq-read.ps1 -Sessions
 # 3. 读某个会话最近的消息（会 Invoke 打开会话；窗口不可见时先显示，不抢焦点）
 powershell -File core\qq-read.ps1 -Open "某人" -Messages -MaxMessages 10
 
+# 3b. 只看新消息（游标在 ~/.dsh/qq-idle/cursor.json，按会话名分）
+powershell -File core\qq-read.ps1 -Open "某人" -Messages -Since
+powershell -File core\qq-read.ps1 -Open "某人" -Messages -Since -Json   # 给 agent 吃
+powershell -File core\qq-read.ps1 -Open "某人" -Reset                   # 把这个会话的游标清掉
+
 # 4. 发一条（会抢前台约两秒；-Do 才真发）
 powershell -File core\qq-send.ps1 -To "某人" -Text "你好" -Do
 
